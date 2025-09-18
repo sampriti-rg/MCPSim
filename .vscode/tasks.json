@@ -1,0 +1,35 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Make-MCPSim",
+            "type": "shell",
+            "command": "make",
+            "group": "build"
+        },
+        {
+            "type": "shell",
+            "label": "Build-MCPSim",
+            "command": "/usr/bin/g++",
+            "args": [
+                "-g",
+                "${file}",
+                "-DRAMULATOR",
+                "-Icommon/DRAMPower/src",
+                "-Lcommon/DRAMPower/src",
+                "-lboost_program_options",
+                "-ldrampowerxml",
+                "-ldrampower",
+                "-lxerces-c",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}"
+            ],
+            "options": {
+                "cwd": "/usr/bin"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ]
+        }
+    ]
+}

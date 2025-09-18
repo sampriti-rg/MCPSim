@@ -1,0 +1,75 @@
+<!DOCTYPE memspec SYSTEM "memspec.dtd">
+<memspec>
+
+  <parameter id="memoryId" type="string" value="HMC_v2_4GB_Stack_2Gbit_Vault_2500MTs" />
+  <parameter id="memoryType" type="string" value="HMC" />
+  <memarchitecturespec>
+    <!-- This describes a single 2Gbit HMC Vault/Channel -->
+    <!-- Capacity = 1 rank * 16 banks * 512 rows * 1024 columns * 256 bits = 2 Gbit -->
+    <parameter id="width" type="uint" value="256" />      <!-- Internal data bus width of the vault's DRAM interface in bits -->
+    <parameter id="nbrOfBanks" type="uint" value="16" />   <!-- Banks per vault -->
+    <parameter id="nbrOfRanks" type="uint" value="1" />    <!-- Ranks per vault (modeling the DRAM portion of a vault) -->
+    <parameter id="nbrOfColumns" type="uint" value="1024" /> <!-- Number of columns in a row -->
+    <parameter id="nbrOfRows" type="uint" value="512" />   <!-- Number of rows per bank -->
+    <parameter id="dataRate" type="uint" value="2" />      <!-- DDR operation (2 transfers per clock cycle) -->
+    <parameter id="burstLength" type="uint" value="8" />   <!-- Burst length for DDR3-like core -->
+  </memarchitecturespec>
+
+  <memtimingspec>
+      <!-- Timings are in clock cycles of tCK = 1 / 1250MHz = 0.8 ns -->
+      <parameter id="clkMhz" type="double" value="1250" /> <!-- DRAM core clock frequency -->
+      <parameter id="RC" type="uint" value="62" />        <!-- tRAS (44) + tRP (18) -->
+      <parameter id="RCD" type="uint" value="18" />       <!-- RAS to CAS Delay (13.75ns / 0.8ns -> 18) -->
+      <parameter id="RL" type="uint" value="15" />        <!-- Read Latency (CAS Latency, typical for HMC 2500MT/s) -->
+      <parameter id="RP" type="uint" value="18" />        <!-- Row Precharge Time (13.75ns / 0.8ns -> 18) -->
+      <parameter id="RFC" type="uint" value="200" />      <!-- Refresh Cycle Time (160ns / 0.8ns -> 200 for 2Gb) -->
+      <parameter id="RAS" type="uint" value="44" />       <!-- Row Active Time (35ns / 0.8ns -> 44) -->
+      <parameter id="WL" type="uint" value="8" />         <!-- Write Latency (CWL, typical for HMC 2500MT/s) -->
+      <parameter id="AL" type="uint" value="0" />         <!-- Additive Latency (typically 0 for LPDDR3-like) -->
+      <parameter id="DQSCK" type="uint" value="1" />      <!-- DQS output access from CK (assumed 1 tCK) -->
+      <parameter id="RTP" type="uint" value="10" />       <!-- Read to Precharge (max(4, 7.5ns/0.8ns) -> 10 for BL8) -->
+      <parameter id="WR" type="uint" value="19" />        <!-- Write Recovery Time (15ns / 0.8ns -> 19) -->
+      <parameter id="XP" type="uint" value="8" />         <!-- Exit Power Down (6ns / 0.8ns -> 8) -->
+      <parameter id="XPDLL" type="uint" value="8" />      <!-- Exit Power Down to DLL (same as XP) -->
+      <parameter id="XS" type="uint" value="213" />       <!-- Exit Self Refresh (tRFC + 10ns -> 200 + 12.5 -> 213) -->
+      <parameter id="XSDLL" type="uint" value="213" />    <!-- Exit Self Refresh to DLL (same as XS) -->
+      <parameter id="REFI" type="uint" value="9750" />    <!-- Average Refresh Interval (7.8us / 0.8ns -> 9750) -->
+      <parameter id="CL" type="uint" value="15" />        <!-- CAS Latency (same as RL) -->
+      <parameter id="TAW" type="uint" value="50" />       <!-- Four Activate Window (tFAW, 40ns / 0.8ns -> 50) -->
+      <parameter id="RRD" type="uint" value="8" />        <!-- Row to Row Delay (tRRD_L, 6.25ns / 0.8ns -> 8) -->
+      <parameter id="CCD" type="uint" value="4" />        <!-- CAS to CAS Delay (BL/dataRate = 8/2 = 4 for DDR BL8) -->
+      <parameter id="WTR" type="uint" value="10" />       <!-- Write to Read Delay (tWTR_L, 7.5ns / 0.8ns -> 10) -->
+      <parameter id="CKE" type="uint" value="7" />        <!-- CKE Minimum Pulse Width (5ns / 0.8ns -> 7) -->
+      <parameter id="CKESR" type="uint" value="8" />      <!-- CKE Min Pulse Width during Self Refresh (tCKE + 1) -->
+  </memtimingspec>
+
+  <mempowerspec>
+      <!-- HMC DRAM core primarily uses 1.2V. We map these to vdd2 and iddX2 as per sample structure. -->
+      <!-- vdd and iddX are placeholders for a potential primary voltage not dominant in HMC DRAM core. -->
+      <parameter id="vdd" type="double" value="1.8" />      <!-- Placeholder, not primary HMC DRAM core voltage -->
+      <parameter id="idd0" type="double" value="0.01" />     <!-- Placeholder -->
+      <parameter id="idd2p0" type="double" value="0.01" />   <!-- Placeholder -->
+      <parameter id="idd2p1" type="double" value="0.01" />   <!-- Placeholder -->
+      <parameter id="idd2n" type="double" value="0.01" />    <!-- Placeholder -->
+      <parameter id="idd3p0" type="double" value="0.01" />   <!-- Placeholder -->
+      <parameter id="idd3p1" type="double" value="0.01" />   <!-- Placeholder -->
+      <parameter id="idd3n" type="double" value="0.01" />    <!-- Placeholder -->
+      <parameter id="idd4r" type="double" value="0.01" />    <!-- Placeholder -->
+      <parameter id="idd4w" type="double" value="0.01" />    <!-- Placeholder -->
+      <parameter id="idd5" type="double" value="0.01" />     <!-- Placeholder -->
+      <parameter id="idd6" type="double" value="0.01" />     <!-- Placeholder -->
+
+      <parameter id="vdd2" type="double" value="1.2" />     <!-- HMC DRAM Core Voltage -->
+      <parameter id="idd02" type="double" value="75.0" />    <!-- Active standby, all banks precharged (IDD0) -->
+      <parameter id="idd2p02" type="double" value="12.0" />  <!-- Precharge power-down, fast exit (IDD2P) -->
+      <parameter id="idd2p12" type="double" value="12.0" />  <!-- Precharge power-down, slow exit (using IDD2P) -->
+      <parameter id="idd2n2" type="double" value="40.0" />   <!-- Standby, all banks idle (IDD2N) -->
+      <parameter id="idd3p02" type="double" value="25.0" />  <!-- Active power-down, fast exit (IDD3P) -->
+      <parameter id="idd3p12" type="double" value="25.0" />  <!-- Active power-down, slow exit (using IDD3P) -->
+      <parameter id="idd3n2" type="double" value="55.0" />   <!-- Active standby, one bank open (IDD3N) -->
+      <parameter id="idd4r2" type="double" value="210.0" />  <!-- Burst read (IDD4R) -->
+      <parameter id="idd4w2" type="double" value="220.0" />  <!-- Burst write (IDD4W) -->
+      <parameter id="idd52" type="double" value="240.0" />   <!-- Burst refresh (IDD5B) -->
+      <parameter id="idd62" type="double" value="7.0" />     <!-- Self-refresh (IDD6) -->
+  </mempowerspec>
+</memspec>

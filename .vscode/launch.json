@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug-MCPSim",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/MCPsim",
+            "args": ["--config", "${workspaceFolder}/Configs/sample.cfg", "--stats", "${workspaceFolder}/outputs/test.stats", 
+            "--trace", "${workspaceFolder}/traces/bfs"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "Make-MCPSim",
+            "miDebuggerPath": "/usr/bin/gdb"
+        }
+    ]
+}
+        

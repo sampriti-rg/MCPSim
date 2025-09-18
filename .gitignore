@@ -1,0 +1,9 @@
+# All will be ignore during push to github.
+
+/obj/*
+/outputs/*.stats
+/traces/*.0
+/compiled_data/*.json
+/Trace_Extractor/pin-3.22-98547-g7a303a835-gcc-linux/*
+/Trace_Extractor/obj-intel64/*
+mcpsim
