@@ -55,7 +55,6 @@ public:
 
     std::string get_nmp_core_org() const {return options.find("mcp_core_org")->second;}
     std::string get_nmp_core_inst_issue_type() const {return options.find("mcp_core_inst_issue")->second;}
-    int get_nmp_core_num() const {return get_int_value("number_mcp_cores");}
     int get_nmp_tick() const {return int(1000000.0 / get_int_value("mcp_frequency"));}
 
     bool has_nmp_core_caches() const {
@@ -119,6 +118,9 @@ public:
       return atoi(options.find(name)->second.c_str());
     }
     
+    std::string get_memory_type() const{
+       return options.find("standard")->second;;
+    }
     int get_stacks() const {return get_int_value("stacks");}
     int get_channels() const {return get_int_value("channels");}
     int get_subarrays() const {return get_int_value("subarrays");}

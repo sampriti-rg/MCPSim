@@ -4,7 +4,7 @@ CPP = clang++
 LLVM_FLAGS = -S -emit-llvm -fopenmp -fno-discard-value-names -c
 APP_FLAGS = -std=c++0x -Wall -Wno-deprecated -DNO_PFM -O0 -DUSE_OMP -DEDGES_ONLY -DENABLE_OUTPUT -pthread -fopenmp -L tools/lib  -I common -I openG -I/usr/lib/gcc/x86_64-linux-gnu/4.8/include/
 LOOP_OPT_FLAGS = -load ../LoopAnnotation.so -loop-annotation
-BB_OPT_FLAGS = -load ../BBAnnotationPass.so -bb-annotation
+BB_OPT_FLAGS = -load ../BBInfoPass.so -bb-info
 LLVM_LINK = llvm-link
 OPT = opt
 OUTPUT = bfs

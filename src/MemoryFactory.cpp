@@ -3,6 +3,7 @@
 #include "WideIO.h"
 #include "WideIO2.h"
 #include "HBM.h"
+#include "HBM2.h"
 #include "SALP.h"
 
 using namespace ramulator;
@@ -29,6 +30,11 @@ void MemoryFactory<WideIO2>::validate(int channels, int ranks, const Config& con
 template <>
 void MemoryFactory<HBM>::validate(int channels, int ranks, const Config& configs) {
     assert(channels == 8 && "HBM comes with 8 channels");
+}
+
+template <>
+void MemoryFactory<HBM2>::validate(int channels, int ranks, const Config& configs) {
+    assert(channels == 8 && "HBM2 comes with 8 channels");
 }
 
 template <>

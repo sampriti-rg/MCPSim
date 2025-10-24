@@ -3,11 +3,12 @@
 
 #include "Config.h"
 #include "Packet.h"
-#include "HMC_Controller.h"
+#include "3DMemory_Controller.h"
 #include "Memory.h"
 
 #include <memory>
 #include <vector>
+#include <type_traits>
 
 namespace ramulator {
 
@@ -104,12 +105,12 @@ template<typename T>
 class Switch {
  public:
   LogicLayer<T>* logic_layer;
-  std::vector<Controller<T>*> vault_ctrls;
+  std::vector<Controller<T>*> ctrls;
   long clk = 0;
 
   Switch(const Config& configs, LogicLayer<T>* logic_layer,
-         std::vector<Controller<T>*> vault_ctrls):
-      logic_layer(logic_layer), vault_ctrls(vault_ctrls) {}
+         std::vector<Controller<T>*> ctrls):
+      logic_layer(logic_layer), ctrls(ctrls) {}
 
   void tick();
 
@@ -130,9 +131,9 @@ class LogicLayer {
   std::vector<std::shared_ptr<Link<T>>> pass_thru_links;
 
   LogicLayer(const Config& configs, int cub, T* spec,
-      std::vector<Controller<T>*> vault_ctrls, MemoryBase* mem,
+      std::vector<Controller<T>*> ctrls, MemoryBase* mem,
       function<void(Packet&)> host_ctrl_recv):
-      spec(spec), mem(mem), xbar(configs, this, vault_ctrls) {
+      spec(spec), mem(mem), xbar(configs, this, ctrls) {
     // initialize some system parameters
     one_flit_cycles =
         (128.0/(spec->lane_speed * spec->link_width))/mem->clk_ns();

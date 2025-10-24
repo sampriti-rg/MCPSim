@@ -38,8 +38,8 @@ public:
 
     long arrive = -1;
     long depart;
-    long arrive_hmc;
-    long depart_hmc;
+    long arrive_memory;
+    long depart_memory;
 
     int burst_count = 0;
     int transaction_bytes = 0;

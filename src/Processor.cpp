@@ -32,7 +32,7 @@ Processor::Processor(const Config &configs,
     else
     {
         initial_core_id = configs.get_core_num();
-        number_cores = configs.get_nmp_core_num();
+        number_cores = configs.get_channels();
         cycle_time = configs.get_nmp_tick() / 1000.0;
     }
 
@@ -161,7 +161,7 @@ Processor::Processor(const Config &configs,
       llc_pointer(llc_p)       /* assigned LLC (CPU side) to llc_pointer */
 {
     assert(cachesys != nullptr);
-    initial_core_id = configs.get_core_num() + configs.get_nmp_core_num();   /* NLP core id start after number_cores+number_nmp_cores to number of banks */
+    initial_core_id = configs.get_core_num() + configs.get_channels();   /* NLP core id start after number_cores+number_nmp_cores to number of banks */
     number_cores = configs.get_nlp_core_num();
     cycle_time = configs.get_nmp_tick() / 1000.0;
     nlp_side = true;   /* used to specify that is nlp processor side */
@@ -498,7 +498,7 @@ bool Processor::can_context_switch(long processID)
             if (memory.pending_requests() > 0) return false;
         }
 
-        memory.restore_hmc_tags();  // to resolve the co-simulation problem.
+        memory.restore_logic_tags();  // to resolve the co-simulation problem.
     }   
     return true;
 }
@@ -557,7 +557,7 @@ bool Processor::can_nmp_switch()
             if (memory.pending_link_packets() > 0) return false;
             if (memory.pending_requests() > 0) return false;
         }
-        // memory.restore_hmc_tags();    // enable if encounter problem.
+        // memory.restore_logic_tags();    // enable if encounter problem.
     }
     return true;
 }
@@ -718,7 +718,7 @@ Core::Core(const Config &configs, int coreid, function<bool(Request)> send_next,
         if (!nlp_side)
         { 
             memory_energy = 0.010558;  //nj/bit [DRAM+TSV+Logic]
-            own_vault_target_addr = (id - configs.get_core_num());  // assuming [vault id == core id]
+            own_vault_target_addr = (id - configs.get_core_num());  // assuming [vault/channel id == core id]
         }
 
         if (no_core_caches)
@@ -1365,7 +1365,7 @@ void Core::instruction_bypass()
     }
     else    // otherwise insert the instruction to the NMP core whos corrosponding vault has the instruction.
     {
-        Core *nmp_core = nmp_proc->cores[get_vault_target(trace_line.instPointer)].get();
+        Core *nmp_core = nmp_proc->cores[get_channel_or_vault_target(trace_line.instPointer)].get();
         if (configs.get_nmp_core_queue_max_size() != 0 && nmp_core->inst_queue.numberInstructionsInQueue >= configs.get_nmp_core_queue_max_size())
         {
             pending_inst_bypass = true;
@@ -1395,16 +1395,32 @@ bool Core::check_for_dirty(long addr)
 }
 
 /* get the mmeory vault address where the requesting address (mem_addr) is reside */
-int Core::get_vault_target(long mem_addr)
+int Core::get_channel_or_vault_target(long mem_addr)
 {
     MemoryBase *ptr_mem = &memory;
-    Memory<HMC, Controller> *ptr = dynamic_cast<Memory<HMC, Controller> *>(ptr_mem);
-    ptr->clear_higher_bits(mem_addr, ptr->max_address - 1ll);
-    ptr->clear_lower_bits(mem_addr, ptr->tx_bits);
-    int max_block_col_bits = ptr->spec->maxblock_entry.flit_num_bits - ptr->tx_bits;
-    ptr->slice_lower_bits(mem_addr, max_block_col_bits);
-    int vault_target = ptr->slice_lower_bits(mem_addr, ptr->addr_bits[int(HMC::Level::Vault)]);
-    return vault_target;
+    if (configs.get_memory_type() == "HMC") {
+        Memory<HMC, Controller> *ptr = dynamic_cast<Memory<HMC, Controller> *>(ptr_mem);
+        ptr->clear_higher_bits(mem_addr, ptr->max_address - 1ll);
+        ptr->clear_lower_bits(mem_addr, ptr->tx_bits);
+        int max_block_col_bits = ptr->spec->maxblock_entry.flit_num_bits - ptr->tx_bits;
+        ptr->slice_lower_bits(mem_addr, max_block_col_bits);
+        int vault_target = ptr->slice_lower_bits(mem_addr, ptr->addr_bits[int(HMC::Level::Vault)]);
+        return vault_target;
+    }
+    
+    if (configs.get_memory_type() == "HBM") {
+        Memory<HBM, Controller> *ptr = dynamic_cast<Memory<HBM, Controller> *>(ptr_mem);
+        ptr->clear_lower_bits(mem_addr, ptr->tx_bits);
+        int channel_target = ptr->slice_lower_bits(mem_addr, ptr->addr_bits[int(HBM::Level::Channel)]);
+        return channel_target;
+    }
+
+    if (configs.get_memory_type() == "HBM2") {
+        Memory<HBM2, Controller> *ptr = dynamic_cast<Memory<HBM2, Controller> *>(ptr_mem);
+        ptr->clear_lower_bits(mem_addr, ptr->tx_bits);
+        int channel_target = ptr->slice_lower_bits(mem_addr, ptr->addr_bits[int(HBM2::Level::Channel)]);
+        return channel_target;
+    }
 }
 
 /* this is used to lock/unlock the cores (using flag) which executing the current process (using processID) */
@@ -1465,7 +1481,7 @@ void Core::tick_inOrder()
         while (trace_line.sourceAddr[l_index] != 0)
         {
             if (inserted == window.ipc) { idle_cycles++; return; }
-            if (get_vault_target(trace_line.sourceAddr[l_index]) == own_vault_target_addr)
+            if (get_channel_or_vault_target(trace_line.sourceAddr[l_index]) == own_vault_target_addr)
             {
                 Request req(trace_line.sourceAddr[l_index], Request::Type::READ, callback, id, is_nmp);
                 if (!send(req)) { idle_cycles++; return; }
@@ -1485,7 +1501,7 @@ void Core::tick_inOrder()
     {
         while (trace_line.destAddr[s_index] != 0)
         {
-            if (get_vault_target(trace_line.destAddr[s_index]) == own_vault_target_addr)
+            if (get_channel_or_vault_target(trace_line.destAddr[s_index]) == own_vault_target_addr)
             {
                 Request req(trace_line.destAddr[s_index], Request::Type::WRITE, callback, id, is_nmp);
                 if (!send(req)) { idle_cycles++; return; }

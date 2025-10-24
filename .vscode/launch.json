@@ -6,7 +6,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/MCPsim",
-            "args": ["--config", "${workspaceFolder}/Configs/sample.cfg", "--stats", "${workspaceFolder}/outputs/test.stats", 
+            "args": ["--config", "${workspaceFolder}/Configs/co-sim-hbm2.cfg", "--stats", "${workspaceFolder}/outputs/test.stats", 
             "--trace", "${workspaceFolder}/traces/bfs"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

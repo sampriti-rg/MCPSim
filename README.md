@@ -4,12 +4,12 @@ MCPSim : Memory-Centric Processing Simulator
 A hybrid Memory-Centric Processing (MCP) simulator based on the basic Ramulator simulator. The simulation support co-simulation between Host processor and MCP processing units and hybrid MCP architecture where the MCP processing units reside in memory (as Near-Memory Processing, i.e., NMP) as well as cache side (as Near-LLC Processing, i.e., NLP). Additionally, It also promotes simulating the application as a single deployment by utilizing compiler-extracted information instead of depending on dynamic profiling tools.
 
 ```
-+--------+         +--------+         +--------+
-|   CPU  | <<--->> |   LLC  | <<--->> | Memory |
-+--------+         +--------+         +--------+
-                   |   NLP  |         |   NMP  |
-               |   +--------+         +--------+   |
-               +-----------------------------------+
++--------+         +--------+         +-----------+
+|   CPU  | <<--->> |   LLC  | <<--->> | 3D Memory |
++--------+         +--------+         +-----------+
+                   |   NLP  |         |    NMP    |
+               |   +--------+         +-----------+   |
+               +--------------------------------------+
                      Memory-Centric Processing
 ```
 

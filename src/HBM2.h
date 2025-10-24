@@ -1,5 +1,5 @@
-#ifndef __HBM_H
-#define __HBM_H
+#ifndef __HBM2_H
+#define __HBM2_H
 
 #include "DRAM.h"
 #include "Request.h"
@@ -11,19 +11,20 @@ using namespace std;
 namespace ramulator
 {
 
-class HBM
+class HBM2
 {
 public:
     static string standard_name;
     enum class Org;
     enum class Speed;
-    HBM(Org org, Speed speed);
-    HBM(const string& org_str, const string& speed_str);
+    HBM2(Org org, Speed speed);
+    HBM2(const string& org_str, const string& speed_str);
 
     static map<string, enum Org> org_map;
     static map<string, enum Speed> speed_map;
 
     /* Level */
+	/* we treat Rank as Pseudo Channel */
     enum class Level : int
     {
         Channel, Rank, BankGroup, Bank, Row, Column, MAX
@@ -51,7 +52,7 @@ public:
     Level scope[int(Command::MAX)] = {
         Level::Row,    Level::Bank,   Level::Rank,
         Level::Column, Level::Column, Level::Column, Level::Column,
-        Level::Rank,   Level::Bank,   Level::Rank,   Level::Rank,   Level::Rank,   Level::Rank
+        Level::Rank,   Level::Bank,   Level::Channel,   Level::Channel,   Level::Channel,   Level::Channel
     };
 
     bool is_opening(Command cmd)
@@ -116,12 +117,12 @@ public:
     };
 
     /* Prereq */
-    function<Command(DRAM<HBM>*, Command cmd, int)> prereq[int(Level::MAX)][int(Command::MAX)];
+    function<Command(DRAM<HBM2>*, Command cmd, int)> prereq[int(Level::MAX)][int(Command::MAX)];
 
-    // TODO: added function object container for row hit status
+    // SAUGATA: added function object container for row hit status
     /* Row hit */
-    function<bool(DRAM<HBM>*, Command cmd, int)> rowhit[int(Level::MAX)][int(Command::MAX)];
-    function<bool(DRAM<HBM>*, Command cmd, int)> rowopen[int(Level::MAX)][int(Command::MAX)];
+    function<bool(DRAM<HBM2>*, Command cmd, int)> rowhit[int(Level::MAX)][int(Command::MAX)];
+    function<bool(DRAM<HBM2>*, Command cmd, int)> rowopen[int(Level::MAX)][int(Command::MAX)];
 
     /* Timing */
     struct TimingEntry
@@ -134,19 +135,14 @@ public:
     vector<TimingEntry> timing[int(Level::MAX)][int(Command::MAX)];
 
     /* Lambda */
-    function<void(DRAM<HBM>*, int)> lambda[int(Level::MAX)][int(Command::MAX)];
+    function<void(DRAM<HBM2>*, int)> lambda[int(Level::MAX)][int(Command::MAX)];
 
     /* Organization */
     enum class Org : int
     { // per channel density here. Each stack comes with 8 channels
-        HBM_1Gb,
-        HBM_2Gb,
-        HBM_4Gb,
-        HBM_4Gb_bank32,
-        HBM_4Gb_bank64,
-        HBM_4Gb_bank128,
-        HBM_4Gb_bank256,
-        HBM_4Gb_bank512,
+        HBM2_2Gb,
+        HBM2_4Gb,
+        HBM2_8Gb,
         MAX
     };
 
@@ -155,14 +151,9 @@ public:
         int dq;
         int count[int(Level::MAX)];
     } org_table[int(Org::MAX)] = {
-        {1<<10, 128, {0, 0, 4, 2, 1<<13, 1<<(6+1)}},
         {2<<10, 128, {0, 0, 4, 2, 1<<14, 1<<(6+1)}},
         {4<<10, 128, {0, 0, 4, 4, 1<<14, 1<<(6+1)}},
-        {4<<10, 128, {0, 0, 4, 8, 1<<13, 1<<(6+1)}},
-        {4<<10, 128, {0, 0, 4, 16, 1<<12, 1<<(6+1)}},
-        {4<<10, 128, {0, 0, 4, 32, 1<<11, 1<<(6+1)}},
-        {4<<10, 128, {0, 0, 4, 64, 1<<10, 1<<(6+1)}},
-        {4<<10, 128, {0, 0, 4, 128, 1<<9, 1<<(6+1)}},
+        {8<<10, 128, {0, 0, 4, 4, 1<<15, 1<<(6+1)}},
     }, org_entry;
 
     void set_channel_number(int channel);
@@ -171,8 +162,7 @@ public:
     /* Speed */
     enum class Speed : int
     {
-        HBM_1Gbps,
-        HBM_1Gbps_unlimit_bandwidth,
+        HBM2_2Gbps,
         MAX
     };
 
@@ -185,14 +175,37 @@ public:
         int nBL, nCCDS, nCCDL;
         int nCL, nRCDR, nRCDW, nRP, nCWL;
         int nRAS, nRC;
-        int nRTP, nWTRS, nWTRL, nWR;
+        int nRTPL, nRTPS, nWTRS, nWTRL, nWR;
         int nRRDS, nRRDL, nFAW;
         int nRFC, nREFI, nREFI1B;
         int nPD, nXP;
         int nCKESR, nXS;
+        /* newly added parameters */
+        int nCKE;
+        int nRREFD, nRFCSB, nREFSBPDE;
+        int nACTPDE, nREFPDE, nPRPDE;
+        int nWL, nRL, nPL;
+        int nRTW;
+        int nRDSRE;
+        int nWRAPDE, nWRPDE, nRDPDE;
     } speed_table[int(Speed::MAX)] = {
-        {1000, 500, 2.0, 2, 2, 3, 7, 7, 6, 7, 4, 17, 24, 7, 2, 4, 8, 4, 5, 20, 0, 1950, 0, 5, 5, 5, 0},
-        {1000, 500, 2.0, 0, 1, 1, 7, 7, 6, 7, 4, 17, 24, 7, 2, 4, 8, 4, 5, 20, 0, 1950, 0, 5, 5, 5, 0},
+		{2000, 
+		1000, 1.0, 
+		2, 2, 4, 
+		14, 14, 10, 15, 7, 
+		33, 48, 
+		5, 4, 3, 8, 15, 
+		4, 6, 16, 
+		0, 3900, 0, 
+		6, 8, 
+		7, 0, 
+		6, 
+		8, 160, 1, 
+		1, 1, 1, 
+		3, 4, 2, 
+		9, 
+		9, 
+		23, 23, 9}
     }, speed_entry;
 
     int read_latency;
@@ -210,11 +223,11 @@ private:
     void init_speed();
     void init_lambda();
     void init_prereq();
-    void init_rowhit();  // TODO: added function to check for row hits
+    void init_rowhit();  // SAUGATA: added function to check for row hits
     void init_rowopen();
     void init_timing();
 };
 
 } /*namespace ramulator*/
 
-#endif /*__HBM_H*/
+#endif /*__HBM2_H*/

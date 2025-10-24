@@ -5,7 +5,7 @@
 #include "DRAM.h"
 #include "Request.h"
 #include "Controller.h"
-#include "HMC_Controller.h"
+#include "3DMemory_Controller.h"
 #include "SpeedyController.h"
 #include "Statistics.h"
 #include "GDDR5.h"
@@ -39,7 +39,7 @@ public:
     virtual void record_core(int coreid) = 0;
     virtual long get_memory_transection_info() = 0;
     virtual int pending_link_packets() = 0;
-    virtual void restore_hmc_tags() = 0;
+    virtual void restore_logic_tags() = 0;
 };
 
 template <class T, template<typename> class Controller = Controller >
@@ -550,7 +550,7 @@ public:
 
     int pending_link_packets() {}
 
-    void restore_hmc_tags() {}
+    void restore_logic_tags() {}
 
     void finish(void) {
       dram_capacity = max_address;

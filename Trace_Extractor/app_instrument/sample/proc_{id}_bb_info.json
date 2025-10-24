@@ -1,0 +1,94 @@
+[
+    {
+        "BasicBlocks": [
+            {
+                "BasicBlockID": 1,
+                "BasicBlockName": "entry",
+                "IncommingData": 8,
+                "UsedData": 8
+            }
+        ],
+        "FunctionName": "_GLOBAL__sub_I_sample.cpp"
+    },
+    {
+        "BasicBlocks": [
+            {
+                "BasicBlockID": 2,
+                "BasicBlockName": "entry",
+                "IncommingData": 32,
+                "UsedData": 32
+            }
+        ],
+        "FunctionName": "__cxx_global_var_init"
+    },
+    {
+        "BasicBlocks": [
+            {
+                "BasicBlockID": 3,
+                "BasicBlockName": "entry",
+                "IncommingData": 20,
+                "UsedData": 52
+            },
+            {
+                "BasicBlockID": 4,
+                "BasicBlockName": "for.cond",
+                "IncommingData": 24,
+                "UsedData": 57
+            },
+            {
+                "BasicBlockID": 5,
+                "BasicBlockName": "for.body",
+                "IncommingData": 8,
+                "UsedData": 8
+            },
+            {
+                "BasicBlockID": 6,
+                "BasicBlockName": "for.inc",
+                "IncommingData": 8,
+                "UsedData": 16
+            },
+            {
+                "BasicBlockID": 7,
+                "BasicBlockName": "for.end",
+                "IncommingData": 24,
+                "UsedData": 52
+            },
+            {
+                "BasicBlockID": 8,
+                "BasicBlockName": "for.cond4",
+                "IncommingData": 24,
+                "UsedData": 57
+            },
+            {
+                "BasicBlockID": 9,
+                "BasicBlockName": "for.body8",
+                "IncommingData": 8,
+                "UsedData": 8
+            },
+            {
+                "BasicBlockID": 10,
+                "BasicBlockName": "for.inc10",
+                "IncommingData": 8,
+                "UsedData": 16
+            },
+            {
+                "BasicBlockID": 11,
+                "BasicBlockName": "for.end12",
+                "IncommingData": 0,
+                "UsedData": 0
+            }
+        ],
+        "FunctionName": "main"
+    },
+    {
+        "BasicBlocks": [
+            {
+                "BasicBlockID": 12,
+                "BasicBlockName": "entry",
+                "IncommingData": 16,
+                "UsedData": 16
+            }
+        ],
+        "FunctionName": "_ZL13mcp_roi_beginv"
+    }
+]

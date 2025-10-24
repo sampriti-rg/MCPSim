@@ -2,9 +2,9 @@
 #include "Config.h"
 #include "Controller.h"
 #include "SpeedyController.h"
-#include "HMC_Controller.h"
+#include "3DMemory_Controller.h"
 #include "Memory.h"
-#include "HMC_Memory.h"
+#include "3DMemory.h"
 #include "DRAM.h"
 #include "Statistics.h"
 #include <algorithm>
@@ -27,6 +27,7 @@
 #include "WideIO.h"
 #include "WideIO2.h"
 #include "HBM.h"
+#include "HBM2.h"
 #include "HMC.h"
 #include "SALP.h"
 #include "ALDRAM.h"
@@ -100,12 +101,12 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
     Processor nmp_proc(configs, files, send, memory, true);                            // create memory side MCP PUs. (i.e., NMP)
     Processor nlp_proc(configs, files, send, memory, true, &proc.llc, proc.cachesys);  // create LLC side MCP PUs. (i.e., NLP)
 
-    proc.nmp_proc = &nmp_proc;                  // initiate NMP side processors to CPU processor.
+    proc.nmp_proc = &nmp_proc;                  // initiate NMP & NLP side processors to CPU processor.
     proc.nlp_proc = &nlp_proc;
     proc.init_nmp_side();
     proc.init_nlp_side();
 
-    nmp_proc.nlp_proc = &nlp_proc;              // initiate NMP processors to each others.
+    nmp_proc.nlp_proc = &nlp_proc;              // initiate NMP & NLP processors to each others.
     nlp_proc.nmp_proc = &nmp_proc;
     nmp_proc.init_nlp_side();
     nlp_proc.init_nmp_side();
@@ -237,6 +238,62 @@ void start_run<HMC>(const Config& configs, HMC* spec, const vector<string>& file
   }
 }
 
+template<>
+void start_run<HBM>(const Config& configs, HBM* spec, const vector<string>& files) {
+  int C = configs.get_channels();                         // get the channel count.
+  int R = configs.get_ranks();                            // get the rank count.
+  int S = configs.get_stacks();                           // get the memory stack count.
+  spec->set_channel_number(C);
+  spec->set_rank_number(R);
+  int total_chennel_number = C * S;
+  debug_hmc("total_chennel_number: %d\n", total_chennel_number);
+  std::vector<Controller<HBM>*> ctrls;                        // channel controller pointer container.
+  for (int c = 0 ; c < total_chennel_number ; ++c) {          // creating vault controller.
+    DRAM<HBM>* channel = new DRAM<HBM>(spec, HBM::Level::Channel);
+    channel->id = c;
+    channel->regStats("");
+    Controller<HBM>* ctrl = new Controller<HBM>(configs, channel);
+    ctrls.push_back(ctrl);
+  }
+  Memory<HBM, Controller> memory(configs, ctrls);
+
+  assert(files.size() != 0);
+  if (configs["trace_type"] == "CPU") {
+    run_cputrace(configs, memory, files);
+  } 
+  else {
+    cout << "Trace type should be CPU type." << endl ;
+  }
+}
+
+template<>
+void start_run<HBM2>(const Config& configs, HBM2* spec, const vector<string>& files) {
+  int C = configs.get_channels();                         // get the channel count.
+  int R = configs.get_ranks();                            // get the rank count.
+  int S = configs.get_stacks();                           // get the memory stack count.
+  spec->set_channel_number(C);
+  spec->set_rank_number(R);
+  int total_chennel_number = C * S;
+  debug_hmc("total_chennel_number: %d\n", total_chennel_number);
+  std::vector<Controller<HBM2>*> ctrls;                        // channel controller pointer container.
+  for (int c = 0 ; c < total_chennel_number ; ++c) {          // creating vault controller.
+    DRAM<HBM2>* channel = new DRAM<HBM2>(spec, HBM2::Level::Channel);
+    channel->id = c;
+    channel->regStats("");
+    Controller<HBM2>* ctrl = new Controller<HBM2>(configs, channel);
+    ctrls.push_back(ctrl);
+  }
+  Memory<HBM2, Controller> memory(configs, ctrls);
+
+  assert(files.size() != 0);
+  if (configs["trace_type"] == "CPU") {
+    run_cputrace(configs, memory, files);
+  } 
+  else {
+    cout << "Trace type should be CPU type." << endl ;
+  }
+}
+
 int main(int argc, const char *argv[])
 {
     // to show the help prompt.
@@ -299,8 +356,16 @@ int main(int argc, const char *argv[])
           configs.get_int_value("payload_flits"));
       start_run(configs, hmc, files);
     }
+    else if (standard == "HBM") {
+      HBM* hbm = new HBM(configs["org"], configs["speed"]);
+      start_run(configs, hbm, files);
+    }
+    else if (standard == "HBM2") {
+      HBM2* hbm = new HBM2(configs["org"], configs["speed"]);
+      start_run(configs, hbm, files);
+    }
     else {
-      cout << "Currently it supporting HMC, later it can be extended." << endl ;
+      cout << "Currently it supporting 3D-stacked memory (i.e., HBM/HMC/HBM2), later it can be extended." << endl ;
     }
 
     cout << "Simulation done. Statistics written to " << stats_out << endl ;

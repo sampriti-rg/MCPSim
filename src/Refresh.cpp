@@ -11,7 +11,7 @@
 
 #include "Refresh.h"
 #include "Controller.h"
-#include "HMC_Controller.h"
+#include "3DMemory_Controller.h"
 #include "DRAM.h"
 #include "DSARP.h"
 

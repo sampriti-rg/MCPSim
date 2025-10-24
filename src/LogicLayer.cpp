@@ -81,6 +81,7 @@ void Switch<T>::tick() {
   clk++;
   debug_hmc("@ clk: %ld stack %d", clk, logic_layer->cub);
   // one controller can only receive one packet per cycle
+  // vault and channel are used alternatively.
   std::set<int> used_vaults;
   for (auto link : logic_layer->host_links) {
     if (link->slave.input_buffer.empty()) {
@@ -91,11 +92,16 @@ void Switch<T>::tick() {
     Request& req = packet.req;
     // from links to vaults
     if (packet.header.CUB.value == logic_layer->cub) {
-      int vault_id = req.addr_vec[int(HMC::Level::Vault)];
+      int vault_id;
+      if constexpr (std::is_same<T, HMC>::value) {
+        vault_id = req.addr_vec[int(HMC::Level::Vault)];
+      } else {
+        vault_id = req.addr_vec[int(HBM::Level::Channel)];
+      }
       if (used_vaults.find(vault_id) != used_vaults.end()) {
         continue; // This port has been occupied in this cycle
       }
-      auto ctrl = vault_ctrls[vault_id];
+      auto ctrl = ctrls[vault_id];
       if(ctrl->receive(packet)) {
         link->slave.extracted_token_count += packet.total_flits;
         link->slave.input_buffer.pop_front();
@@ -114,7 +120,7 @@ void Switch<T>::tick() {
   // TODO: support multiple stacks
   // one link can only receive one packet per cycle
   std::set<int> used_links;
-  for (auto vault_ctrl : vault_ctrls) {
+  for (auto vault_ctrl : ctrls) {
     if (vault_ctrl->response_packets_buffer.empty()) {
       continue;
     }

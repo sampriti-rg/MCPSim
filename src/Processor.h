@@ -7,7 +7,7 @@
 #include "Request.h"
 #include "HMC.h"
 #include "Controller.h"
-#include "HMC_Memory.h"
+#include "3DMemory.h"
 #include "Statistics.h"
 #include <iostream>
 #include <vector>
@@ -193,7 +193,7 @@ public:
     void compiler_assist_offload();
     void compiler_assist_setup(int procId);
     bool check_for_dirty(long addr);
-    int get_vault_target(long mem_addr);
+    int get_channel_or_vault_target(long mem_addr);
     void lock_own_cores(long app_id, bool flag);
     bool get_next_instruction();
     void execution_flag_set();
