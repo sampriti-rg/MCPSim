@@ -126,17 +126,21 @@ public:
         assert((sz[0] & (sz[0] - 1)) == 0);
         assert((sz[1] & (sz[1] - 1)) == 0);
         // validate size of one transaction
-        int tx = (spec->prefetch_size * spec->channel_width / 8);
+        int tx = (spec->prefetch_size * spec->channel_width / 16);
         tx_bits = calc_log2(tx);
         assert((1<<tx_bits) == tx);
+
         requests_per_chennel.resize(ctrls.size());
         for(int i = 0; i < ctrls.size(); i++) requests_per_chennel[i] = 0;
-        max_address = spec->channel_width / 8;                                
+
+        max_address = spec->channel_width / 16;                                
         for (unsigned int lev = 0; lev < addr_bits.size(); lev++) {
           addr_bits[lev] = calc_log2(sz[lev]);
             max_address *= sz[lev];
         }
-        addr_bits[int(HBM::Level::MAX) - 1] -= calc_log2(spec->prefetch_size);
+        addr_bits[int(HBM2::Level::MAX) - 1] -= calc_log2(spec->prefetch_size);
+
+        capacity_per_stack = max_address / configs.get_stacks();
 
         // Initiating translation
         if (configs.contains("translation")) {
@@ -879,17 +883,21 @@ public:
         assert((sz[0] & (sz[0] - 1)) == 0);
         assert((sz[1] & (sz[1] - 1)) == 0);
         // validate size of one transaction
-        int tx = (spec->prefetch_size * spec->channel_width / 8);
+        int tx = (spec->prefetch_size * spec->channel_width / 16);
         tx_bits = calc_log2(tx);
         assert((1<<tx_bits) == tx);
+
         requests_per_chennel.resize(ctrls.size());
         for(int i = 0; i < ctrls.size(); i++) requests_per_chennel[i] = 0;
-        max_address = spec->channel_width / 8;                                
+
+        max_address = spec->channel_width / 16;                                
         for (unsigned int lev = 0; lev < addr_bits.size(); lev++) {
           addr_bits[lev] = calc_log2(sz[lev]);
             max_address *= sz[lev];
         }
         addr_bits[int(HBM2::Level::MAX) - 1] -= calc_log2(spec->prefetch_size);
+
+        capacity_per_stack = max_address / configs.get_stacks();
 
         // Initiating translation
         if (configs.contains("translation")) {
