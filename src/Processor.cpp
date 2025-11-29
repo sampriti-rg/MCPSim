@@ -1233,10 +1233,9 @@ void Core::compiler_assist_offload()
         record_region_count++;
         std::vector<float> system_state = own_proc->collect_system_info();    // currently system stats are not using during decision-making process but can be used.
         std::vector<float> bb_info_state = collect_basicblock_info(trace_line.regionID);    // collect basic block info using its region ID.
-
+        decision_overhead_cycles += configs.get_overhead_cycle();
         /* currently its only check the no of memory and non-memory inst. if more memory inst then it offload to MCP side */
         if (bb_info_state[0] > bb_info_state[1]) {
-            decision_overhead_cycles += configs.get_overhead_cycle();
             record_offload_region_count++;
             offload_region_ids.insert(trace_line.regionID);
             inside_region = true;
@@ -1253,8 +1252,8 @@ void Core::compiler_assist_offload()
             record_region_count++;
             std::vector<float> system_state = own_proc->collect_system_info();
             std::vector<float> bb_info_state = collect_basicblock_info(trace_line.regionID);
+            decision_overhead_cycles += configs.get_overhead_cycle();
             if (bb_info_state[0] > bb_info_state[1]) {
-                decision_overhead_cycles += configs.get_overhead_cycle();
                 record_offload_region_count++;
                 offload_region_ids.insert(trace_line.regionID);
                 inside_region = true;
