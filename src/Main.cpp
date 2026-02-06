@@ -111,6 +111,8 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
     nmp_proc.init_nlp_side();
     nlp_proc.init_nmp_side();
 
+    cout << "System initialization done, simulation starting...\n";
+
     bool is_warming_up = (configs.get_warmup_insts() != 0);
     for(long i = 0; is_warming_up; i++) {
       if (i == next_cpu_tick) {            
@@ -178,8 +180,8 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
 
     // Calculate stats.
     proc.calc_stats();
-    if (configs.get_simulation_mode() != "Host-Only") nmp_proc.calc_stats();
     if (configs.get_simulation_mode() != "Host-Only" && configs.get_nlp_facility() == "on") nlp_proc.calc_stats();
+    if (configs.get_simulation_mode() != "Host-Only") nmp_proc.calc_stats();
 
     // This a workaround for statistics set only initially lost in the end
     memory.finish();
@@ -296,6 +298,14 @@ void start_run<HBM2>(const Config& configs, HBM2* spec, const vector<string>& fi
 
 int main(int argc, const char *argv[])
 {
+    cout << "___  ________ ______  _____ _           \n";
+    cout << "|  \\/  /  __ \\| ___ \\/  ___(_)          \n";
+    cout << "| .  . | /  \\/| |_/ /\\ `--. _ _ __ ___  \n";
+    cout << "| |\\/| | |    |  __/  `--. \\ | '_ ` _ \\ \n";
+    cout << "| |  | | \\__/\\| |    /\\__/ / | | | | | |\n";
+    cout << "\\_|  |_/\\____/\\_|    \\____/|_|_| |_| |_|\n";
+    cout << "______________________________________________________________\n";
+
     // to show the help prompt.
     po::options_description desc;
     desc.add_options()

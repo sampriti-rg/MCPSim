@@ -28,8 +28,11 @@ namespace ramulator
       level_string = "L1";
     else if (level == Level::L2)
       level_string = "L2";
-    else if (level == Level::L3)
+    else if (level == Level::L3) {
       level_string = "L3";
+      size = cachesys->configs.get_host_llc_size();
+      assoc = cachesys->configs.get_host_llc_assoc();
+    }
 
     // set some flags to operate.
     is_first_level = (level == cachesys->first_level);    

@@ -226,10 +226,10 @@ void Processor::tick()
     if (!is_nmp)
     {
         if ((int(cpu_cycles.value()) % 1000000) == 0) {
-            printf("CPU heartbeat, cycles: %d \n", (int(cpu_cycles.value())));
-            printf("CPU executed instructions: %d\n", int(calculate_total_instruction()));
-            printf("NMP executed instructions: %d\n", int(nmp_proc->calculate_total_instruction()));
-            printf("NLP executed instructions: %d\n", int(nlp_proc->calculate_total_instruction()));
+            printf("Simulation heartbeat at %d cycles\n", (int(cpu_cycles.value())));
+            printf("    CPU executed instructions: %d\n", int(calculate_total_instruction()));
+            printf("    NLP executed instructions: %d\n", int(nlp_proc->calculate_total_instruction()));
+            printf("    NMP executed instructions: %d\n", int(nmp_proc->calculate_total_instruction()));
         }
     }
 
@@ -650,6 +650,7 @@ std::vector<float> Processor::collect_system_info()
     std::vector<float> state;
     float IPS, miss_rate, off_chip_trans, exe_time, energy, bandwidth;
     exe_time = cpu_cycles.value() * cycle_time;
+    IPS = calculate_total_instruction() / exe_time;
     energy = calculate_Energy() + nmp_proc->calculate_Energy();
     miss_rate = llc.cache_total_miss.value() / llc.cache_total_access.value();
     off_chip_trans = llc.cache_load_blocks.value() + llc.cache_write_back_hmc.value() + llc.cache_write_back_lower.value();
@@ -1235,13 +1236,14 @@ void Core::compiler_assist_offload()
         std::vector<float> bb_info_state = collect_basicblock_info(trace_line.regionID);    // collect basic block info using its region ID.
         decision_overhead_cycles += configs.get_overhead_cycle();
         /* currently its only check the no of memory and non-memory inst. if more memory inst then it offload to MCP side */
-        if (bb_info_state[0] > bb_info_state[1]) {
+        if (bb_info_state[0] > bb_info_state[1] || prev_ips < system_state[0]) {
             record_offload_region_count++;
             offload_region_ids.insert(trace_line.regionID);
             inside_region = true;
             nlp_core_id_gen = 0;
             lock_own_cores(trace_line.processID, true);
         }
+        prev_ips = system_state[0];
     }
 
     // if prev line contain offloadable tag then, read the next trace line until the line contain an instruction.
@@ -1253,13 +1255,14 @@ void Core::compiler_assist_offload()
             std::vector<float> system_state = own_proc->collect_system_info();
             std::vector<float> bb_info_state = collect_basicblock_info(trace_line.regionID);
             decision_overhead_cycles += configs.get_overhead_cycle();
-            if (bb_info_state[0] > bb_info_state[1]) {
+            if (bb_info_state[0] > bb_info_state[1] || prev_ips < system_state[0]) {
                 record_offload_region_count++;
                 offload_region_ids.insert(trace_line.regionID);
                 inside_region = true;
                 nlp_core_id_gen= 0;
                 lock_own_cores(trace_line.processID, true);
             }
+            prev_ips = system_state[0];
             continue;
         }
         else if (strcmp(trace_line.opcode, "ROI_END") == 0 &&  offload_region_ids.count(trace_line.regionID) > 0)    // if the next line contain ending offloadbale tag then perform as previous.

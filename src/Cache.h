@@ -230,7 +230,7 @@ namespace ramulator
   class CacheSystem
   {
   public:
-    CacheSystem(const Config &configs, std::function<bool(Request)> send_memory, bool is_nmp) : send_memory(send_memory), is_nmp(is_nmp)
+    CacheSystem(const Config &configs, std::function<bool(Request)> send_memory, bool is_nmp) : configs(configs), send_memory(send_memory), is_nmp(is_nmp)
     {
       if (configs.has_core_caches())
       {
@@ -285,6 +285,8 @@ namespace ramulator
 
     Cache::Level first_level;
     Cache::Level last_level;
+
+    Config configs;
   };
 
 } // namespace ramulator

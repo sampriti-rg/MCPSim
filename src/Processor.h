@@ -148,6 +148,7 @@ public:
     long nlp_core_id_gen = 0;               // used to generate core ID for NLP side.
     bool nlp_side = false;                  // used to specify the core belong to NLP side.
     bool loads_exe_flag, stores_exe_flag;   // these are simple excution tracking flags.
+    double prev_ips;
 
     std::unordered_map<std::string, int> opcodeCycleCount;  // this will store the info of which opcode consume how many cycle.
     set<long> offload_region_ids;                           // track the offloading region IDs.
