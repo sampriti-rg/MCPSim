@@ -190,13 +190,13 @@ public:
             .precision(0)
             ;
         num_read_requests
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("read_requests")
             .desc("Number of incoming read requests to DRAM")
             .precision(0)
             ;
         num_write_requests
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("write_requests")
             .desc("Number of incoming write requests to DRAM")
             .precision(0)
@@ -336,37 +336,37 @@ public:
             .precision(0)
             ;
         read_row_hits
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("read_row_hits")
             .desc("Number of row hits for read requests")
             .precision(0)
             ;
         read_row_misses
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("read_row_misses")
             .desc("Number of row misses for read requests")
             .precision(0)
             ;
         read_row_conflicts
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("read_row_conflicts")
             .desc("Number of row conflicts for read requests")
             .precision(0)
             ;
         write_row_hits
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("write_row_hits")
             .desc("Number of row hits for write requests")
             .precision(0)
             ;
         write_row_misses
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("write_row_misses")
             .desc("Number of row misses for write requests")
             .precision(0)
             ;
         write_row_conflicts
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("write_row_conflicts")
             .desc("Number of row conflicts for write requests")
             .precision(0)
@@ -402,32 +402,32 @@ public:
             .precision(6)
             ;
         record_read_hits
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_read_hits")
             .desc("record read hit count for this core when it reaches request limit or to the end")
             ;
         record_read_misses
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_read_misses")
             .desc("record_read_miss count for this core when it reaches request limit or to the end")
             ;
         record_read_conflicts
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_read_conflicts")
             .desc("record read conflict count for this core when it reaches request limit or to the end")
             ;
         record_write_hits
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_write_hits")
             .desc("record write hit count for this core when it reaches request limit or to the end")
             ;
         record_write_misses
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_write_misses")
             .desc("record write miss count for this core when it reaches request limit or to the end")
             ;
         record_write_conflicts
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_write_conflicts")
             .desc("record write conflict for this core when it reaches request limit or to the end")
             ;
@@ -1704,13 +1704,13 @@ public:
             .precision(0)
             ;
         num_read_requests
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("read_requests")
             .desc("Number of incoming read requests to DRAM")
             .precision(0)
             ;
         num_write_requests
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("write_requests")
             .desc("Number of incoming write requests to DRAM")
             .precision(0)
@@ -1850,37 +1850,37 @@ public:
             .precision(0)
             ;
         read_row_hits
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("read_row_hits")
             .desc("Number of row hits for read requests")
             .precision(0)
             ;
         read_row_misses
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("read_row_misses")
             .desc("Number of row misses for read requests")
             .precision(0)
             ;
         read_row_conflicts
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("read_row_conflicts")
             .desc("Number of row conflicts for read requests")
             .precision(0)
             ;
         write_row_hits
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("write_row_hits")
             .desc("Number of row hits for write requests")
             .precision(0)
             ;
         write_row_misses
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("write_row_misses")
             .desc("Number of row misses for write requests")
             .precision(0)
             ;
         write_row_conflicts
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("write_row_conflicts")
             .desc("Number of row conflicts for write requests")
             .precision(0)
@@ -1916,32 +1916,32 @@ public:
             .precision(6)
             ;
         record_read_hits
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_read_hits")
             .desc("record read hit count for this core when it reaches request limit or to the end")
             ;
         record_read_misses
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_read_misses")
             .desc("record_read_miss count for this core when it reaches request limit or to the end")
             ;
         record_read_conflicts
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_read_conflicts")
             .desc("record read conflict count for this core when it reaches request limit or to the end")
             ;
         record_write_hits
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_write_hits")
             .desc("record write hit count for this core when it reaches request limit or to the end")
             ;
         record_write_misses
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_write_misses")
             .desc("record write miss count for this core when it reaches request limit or to the end")
             ;
         record_write_conflicts
-            .init(configs.get_core_num() + configs.get_channels())
+            .init(configs.get_core_num() + configs.get_channels() + configs.get_nlp_core_num())
             .name("record_write_conflicts")
             .desc("record write conflict for this core when it reaches request limit or to the end")
             ;
