@@ -250,7 +250,7 @@ void Processor::receive(Request &req)
 {
     if (!no_shared_cache)  /* first llc will take the recv*/
     {
-        llc.callback(req);
+        cores[0]->llc->callback(req);
     }
     else if (!cores[0]->no_core_caches)
     {
@@ -263,14 +263,14 @@ void Processor::receive(Request &req)
 
     /* for the nlp side has not l2 therefore llc does not have valid higer cache 
        (during recv in cache interface) thus we need recv for l1 seperatly */
-    if (nlp_side)
-    {
-        for (unsigned int i = 0; i < cores.size(); ++i)  
-        {
-            Core *core = cores[i].get();
-            core->caches[0]->callback(req);
-        }
-    }
+    // if (nlp_side)
+    // {
+    //     for (unsigned int i = 0; i < cores.size(); ++i)  
+    //     {
+    //         Core *core = cores[i].get();
+    //         core->caches[0]->callback(req);
+    //     }
+    // }
 
     Core *core = cores[req.coreid - initial_core_id].get();   /* finally core will recv */
     core->receive(req);
@@ -516,7 +516,6 @@ void Processor::flush_all_caches()
     llc.flush_all_dirty_lines();
 }
 
-
 /* return true if the one MCP side (NMP/NLP) can switch to other NMP side otherwise false (only between MCPs) */
 bool Processor::can_nmp_switch()
 {
@@ -622,7 +621,7 @@ float Processor::calculate_Energy()
         }
     }
 
-    if (!no_shared_cache) 
+    if (!no_shared_cache && !nlp_side) 
     {
         llc_cache_access += llc.cache_total_access.value();
         memory_access =  llc.cache_load_blocks.value() + llc.cache_write_back_hmc.value() + llc.cache_write_back_lower.value();
@@ -669,6 +668,7 @@ Core::Core(const Config &configs, int coreid, function<bool(Request)> send_next,
       no_shared_cache(!(configs.has_l3_cache() && !is_nmp)), cachesys(cachesys),
       llc(llc), memory(memory)
 {
+    if (nlp_side) no_shared_cache=false;
     inFlightMemoryAccess = 0;
     more_reqs = false;
     deployed_app_id = 0;
@@ -1536,7 +1536,7 @@ void Core::tick()
 /* calculate and show the weightage IPC for the core */
 double Core::calc_ipc()
 {
-    printf("[%d]retired: %ld, clk, %ld\n", id, retired, clk);
+    // printf("[%d]retired: %ld, clk, %ld\n", id, retired, clk);
     return (double)retired / clk;
 }
 
