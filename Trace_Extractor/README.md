@@ -20,7 +20,7 @@ $ make
 The provided Makefile will generate `obj-intel64/MCPSimTracer.so`.
 
 ```bash
-$ export PIN_ROOT=/your/path/to/pin
+$ export PIN_ROOT=/mnt/c/Users/satan/Desktop/Research/Simulator/MCPSim/Trace_Extractor/pin-3.22-98547-g7a303a835-gcc-linux
 $ make
 $ $PIN_ROOT/pin -t obj-intel64/MCPSimTracer.so -- <your program here>
 ```
@@ -39,7 +39,7 @@ The tracer has three options you can set:
 For example, you could trace 200,000 instructions of the program bfs, after skipping the first 100,000 instructions, with this command:
 
 ```bash
-$ $PIN_ROOT/pin -t obj-intel64/MCPSimTracer.so  -s 100000 -e 200000 -o ../traces/bfs.0 -p 4 -- app_instrument/bfs_app/bfs --dataset app_instrument/bfs_app/fb --separator , --threadnum 8
+$ $PIN_ROOT/pin -t obj-intel64/MCPSimTracer.so  -s 100000 -e 1000000 -o ../traces/bfs.0 -p 4 -- app_instrument/bfs_app/bfs --dataset app_instrument/bfs_app/fb --separator , --threadnum 1
 ```
 
 Details of the trace format can be found in the file `trace_format.h`.

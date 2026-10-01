@@ -1,0 +1,1206 @@
+diff --git a/Makefile b/Makefile
+index 901f9f0..fc67ce6 100644
+--- a/Makefile
++++ b/Makefile
+@@ -10,7 +10,7 @@ OBJS := $(patsubst $(SRCDIR)/%.cpp, $(OBJDIR)/%.o, $(SRCS))
+ CXX := g++
+ UNAME_S := $(shell uname -s)
+ ifeq ($(UNAME_S), Linux)
+-  CXXFLAGS := -O3 -std=c++11 -g -w -Wall -Icommon/DRAMPower/src -Lcommon/DRAMPower/src
++  CXXFLAGS := -O3 -flto=auto -std=c++11 -g -w -Wall -Icommon/DRAMPower/src -Lcommon/DRAMPower/src
+   LDFLAGS := -lboost_program_options -ldrampowerxml -ldrampower -lxerces-c
+ endif
+ ifeq ($(UNAME_S), Darwin)
+diff --git a/src/Cache.cpp b/src/Cache.cpp
+index 51ddab0..453e151 100644
+--- a/src/Cache.cpp
++++ b/src/Cache.cpp
+@@ -117,8 +117,13 @@ namespace ramulator
+ 
+     if (is_hit(lines, req.addr, &line))
+     {
+-      lines.push_back(Line(req.addr, get_tag(req.addr), false, line->dirty || (req.type == Request::Type::WRITE), req.coreid));
+-      lines.erase(line);
++      // move the line to the MRU end in place (same fields as the old push_back + erase, no allocation).
++      line->addr = req.addr;
++      line->tag = get_tag(req.addr);
++      line->lock = false;
++      line->dirty = line->dirty || (req.type == Request::Type::WRITE);
++      line->coreId = req.coreid;
++      lines.splice(lines.end(), lines, line);
+       cachesys->hit_list.push_back(make_pair(cachesys->clk + latency[int(level)], req));
+       cache_hit++;
+       debug_cache("hit, update timestamp %ld", cachesys->clk);
+@@ -207,8 +212,12 @@ namespace ramulator
+     assert(line != lines.end());
+ 
+     // update LRU queue. The dirty bit will be set if the dirty bit inherited from higher level(s) is set.
+-    lines.push_back(Line(addr, get_tag(addr), false, dirty || line->dirty, line->coreId));
+-    lines.erase(line);
++    // the line is updated and moved to the MRU end in place instead of being re-allocated.
++    line->addr = addr;
++    line->tag = get_tag(addr);
++    line->lock = false;
++    line->dirty = dirty || line->dirty;
++    lines.splice(lines.end(), lines, line);
+   }
+ 
+   /* this invalidate the cache line as state-of-the-art concept */
+diff --git a/src/Cache.h b/src/Cache.h
+index 1eed9a6..bddfc8d 100644
+--- a/src/Cache.h
++++ b/src/Cache.h
+@@ -197,12 +197,7 @@ namespace ramulator
+ 
+     std::list<Line> &get_lines(long addr)
+     {
+-      if (cache_lines.find(get_index(addr)) == cache_lines.end())
+-      {
+-        cache_lines.insert(make_pair(get_index(addr),
+-                                     std::list<Line>()));
+-      }
+-      return cache_lines[get_index(addr)];
++      return cache_lines[get_index(addr)];  // creates the empty set on first use, as before, with one lookup.
+     }
+   
+   public:
+@@ -225,6 +220,18 @@ namespace ramulator
+     // bool flush_dirty_lines(long coreId);  // Not working ...
+     void flush_line(long addr);
+     void flush_all_dirty_lines();
++
++    // true when tick() would find nothing to resend: walks the same caches tick() recurses into.
++    bool retry_chain_empty() const
++    {
++      const Cache *c = this;
++      while (true)
++      {
++        if (!c->retry_list.empty()) return false;
++        if (c->lower_cache->is_last_level) return true;
++        c = c->lower_cache;
++      }
++    }
+   };
+ 
+   class CacheSystem
+diff --git a/src/Main.cpp b/src/Main.cpp
+index 8e55c6a..ec04363 100644
+--- a/src/Main.cpp
++++ b/src/Main.cpp
+@@ -96,7 +96,7 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
+     long next_nmp_tick = nmp_tick - 1;
+     long next_mem_tick = mem_tick - 1;
+ 
+-    auto send = bind(&Memory<T, Controller>::send, &memory, placeholders::_1);         // bind the send function with mmeory.
++    auto send = [&memory](Request req) { return memory.send(std::move(req)); };        // send function into memory (a lambda avoids std::bind's heap allocation).
+     Processor proc(configs, files, send, memory, false);                               // create CPU processor.
+     Processor nmp_proc(configs, files, send, memory, true);                            // create memory side MCP PUs. (i.e., NMP)
+     Processor nlp_proc(configs, files, send, memory, true, &proc.llc, proc.cachesys);  // create LLC side MCP PUs. (i.e., NLP)
+@@ -113,14 +113,24 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
+ 
+     cout << "System initialization done, simulation starting...\n";
+ 
+-    bool is_warming_up = (configs.get_warmup_insts() != 0);
+-    for(long i = 0; is_warming_up; i++) {
++    // Config values read once, instead of a string-map lookup on every loop iteration.
++    const long warmup_insts = configs.get_warmup_insts();
++    const bool host_only = (configs.get_simulation_mode() == "Host-Only");
++    const bool nlp_on = configs.contains("nlp_facility") && configs["nlp_facility"] == "on";
++    const bool weighted_speedup = configs.calc_weighted_speedup();
++    const bool early_exit = configs.is_early_exit();
++
++    // The loop time i is in units of tick_gcd. Instead of stepping i by 1 and doing nothing on
++    // most steps, it jumps straight to the next clock edge. Every edge is still visited, in the
++    // same order (CPU, then MCP, then memory), so the simulation is unchanged.
++    bool is_warming_up = (warmup_insts != 0);
++    for (long i = 0; is_warming_up; i = std::min(next_cpu_tick, next_mem_tick)) {
+       if (i == next_cpu_tick) {            
+         next_cpu_tick += cpu_tick;
+         proc.tick();
+         Stats::curTick++;
+         is_warming_up = true;
+-        if(proc.get_executed_insts() >= configs.get_warmup_insts()) is_warming_up = false;
++        if(proc.get_executed_insts() >= warmup_insts) is_warming_up = false;
+         
+         if (proc.has_reached_limit()) {
+             printf("WARNING: The end of the input trace file was reached during warmup. Consider changing warmup_insts in the config file.\n");
+@@ -141,19 +151,21 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
+     proc.warmedup_activate();
+     printf("Starting the simulation...\n");
+ 
+-    for (long i = 0; ; i++) {
++    // i restarts at 0 here, as in the original loop. The MCP clock was not advanced during warmup,
++    // so in MCP modes it first catches up on its earlier edges before the CPU edges come around.
++    for (long i = 0; ; ) {
+         if (i == next_cpu_tick) {            
+             next_cpu_tick += cpu_tick;
+             proc.tick();
+             Stats::curTick++; // processor clock, global, for Statistics
+ 
+-            if (configs.calc_weighted_speedup()) {
++            if (weighted_speedup) {
+                 if (proc.has_reached_limit() || proc.finished()) {
+                    if ((proc.is_complete()) && (nmp_proc.is_complete()) && (nlp_proc.is_complete())) break;
+                 }
+             }
+             else{
+-                if (configs.is_early_exit()) {
++                if (early_exit) {
+                     if (proc.finished())
+                         break;
+                 }
+@@ -165,10 +177,10 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
+             }
+         }
+ 
+-        if(i == next_nmp_tick && configs.get_simulation_mode() != "Host-Only") {
++        if(i == next_nmp_tick && !host_only) {
+           next_nmp_tick += nmp_tick;
+           nmp_proc.tick();
+-          if (configs.get_nlp_facility() == "on") nlp_proc.tick();
++          if (nlp_on) nlp_proc.tick();
+           if (proc.finished() && nmp_proc.finished() && nlp_proc.finished() && (proc.is_complete()) && (nmp_proc.is_complete()) && (nlp_proc.is_complete())) break;
+         }
+ 
+@@ -176,6 +188,11 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
+             next_mem_tick += mem_tick;
+             memory.tick();
+         }
++
++        // jump to the next clock edge (the MCP clock only counts when it is actually ticked).
++        long next_edge = std::min(next_cpu_tick, next_mem_tick);
++        if (!host_only) next_edge = std::min(next_edge, next_nmp_tick);
++        i = next_edge;
+     }
+ 
+     // Calculate stats.
+diff --git a/src/Processor.cpp b/src/Processor.cpp
+index c125e57..1da705d 100644
+--- a/src/Processor.cpp
++++ b/src/Processor.cpp
+@@ -2,10 +2,27 @@
+ #include <stdexcept>
+ 
+ #include <cassert>
++#include <climits>
+ 
+ using namespace std;
+ using namespace ramulator;
+ 
++/* map the sim_mode string to an enum once, so the hot path compares integers instead of strings */
++SimMode ramulator::parse_sim_mode(const std::string& mode)
++{
++    if (mode == "Host-Only") return SimMode::HostOnly;
++    if (mode == "All-Offload") return SimMode::AllOffload;
++    if (mode == "Co-Simulation") return SimMode::CoSimulation;
++    if (mode == "MCP-Only") return SimMode::MCPOnly;
++    return SimMode::Unknown;
++}
++
++/* a string option compared against "on", read once; a missing key counts as off */
++static bool option_is(const Config& configs, const std::string& key, const std::string& value)
++{
++    return configs.contains(key) && configs[key] == value;
++}
++
+ /* defination of processor interface (CPU and MCP) */
+ Processor::Processor(const Config &configs,
+                      vector<string> trace_list,
+@@ -23,6 +40,8 @@ Processor::Processor(const Config &configs,
+       memory(memory)
+ {
+     assert(cachesys != nullptr);
++    debug_ctx_switch = option_is(configs, "debug_context_swithing", "on");
++    nlp_off = option_is(configs, "nlp_facility", "off");
+     if (!is_nmp)  /* CPU core id: [0 to number_cores], MCP PU id [number_cores+1 to number_nmp_cores] */
+     {
+         initial_core_id = 0;
+@@ -48,7 +67,8 @@ Processor::Processor(const Config &configs,
+     {
+         for (int i = 0; i < number_cores; i++)
+         {
+-            cores.emplace_back(new Core(configs, i + initial_core_id, std::bind(&Cache::send, &llc, std::placeholders::_1),
++            Cache* llc_p = &llc;
++            cores.emplace_back(new Core(configs, i + initial_core_id, [llc_p](Request req) { return llc_p->send(std::move(req)); },
+                                         &llc, cachesys, memory, is_nmp, false));
+         }
+     }
+@@ -74,7 +94,7 @@ Processor::Processor(const Config &configs,
+     ipcs.resize(number_cores);
+     for (int i = 0; i < number_cores; ++i)
+     {
+-        cores[i]->callback = std::bind(&Processor::receive, this, placeholders::_1);
++        cores[i]->callback = [this](Request &req) { this->receive(req); };  // a one-pointer lambda fits in std::function's inline buffer, so copying a Request no longer allocates.
+         ipcs[i] = -1;
+     }
+ 
+@@ -161,6 +181,8 @@ Processor::Processor(const Config &configs,
+       llc_pointer(llc_p)       /* assigned LLC (CPU side) to llc_pointer */
+ {
+     assert(cachesys != nullptr);
++    debug_ctx_switch = option_is(configs, "debug_context_swithing", "on");
++    nlp_off = option_is(configs, "nlp_facility", "off");
+     initial_core_id = configs.get_core_num() + configs.get_channels();   /* NLP core id start after number_cores+number_nmp_cores to number of banks */
+     number_cores = configs.get_nlp_core_num();
+     cycle_time = configs.get_nmp_tick() / 1000.0;
+@@ -169,7 +191,8 @@ Processor::Processor(const Config &configs,
+     /* creating NLP cores */
+     for (int i = 0; i < number_cores; i++)
+     {
+-        cores.emplace_back(new Core(configs, i + initial_core_id, std::bind(&Cache::send, llc_pointer, std::placeholders::_1),
++        Cache* llc_p = llc_pointer;
++        cores.emplace_back(new Core(configs, i + initial_core_id, [llc_p](Request req) { return llc_p->send(std::move(req)); },
+                                     llc_pointer, cachesys, memory, is_nmp, nlp_side));
+     }
+ 
+@@ -181,7 +204,7 @@ Processor::Processor(const Config &configs,
+     ipcs.resize(number_cores);
+     for (int i = 0; i < number_cores; ++i)
+     {
+-        cores[i]->callback = std::bind(&Processor::receive, this, placeholders::_1);
++        cores[i]->callback = [this](Request &req) { this->receive(req); };  // a one-pointer lambda fits in std::function's inline buffer, so copying a Request no longer allocates.
+         ipcs[i] = -1;
+     }
+ 
+@@ -238,11 +261,20 @@ void Processor::tick()
+         cachesys->tick();
+     }
+ 
++    proc_ticks++;
+     for (unsigned int i = 0; i < cores.size(); i++)
+     {
+         Core *core = cores[i].get();
++        if (core->asleep) continue;     // its idle cycles are counted in bulk by sync_idle().
++        ticking_index = i;
+         core->tick();
+     }
++    ticking_index = -1;
++}
++
++void Processor::sync_all_idle()
++{
++    for (auto &core : cores) core->sync_idle();
+ }
+ 
+ /* when the processor recv a call back from memory */
+@@ -279,6 +311,7 @@ void Processor::receive(Request &req)
+ /* calculate basic stats to show in terminal */
+ void Processor::calc_stats()
+ {
++    sync_all_idle();
+     long long num_region_cnt = 0, offload_region_cnt = 0;
+ 
+     for (unsigned int i = 0; i < cores.size(); ++i)
+@@ -449,7 +482,7 @@ bool Processor::can_context_switch(long processID)
+             // only check the participating cores can switch or not.
+             if(cores[i]->deployed_app_id == processID) {     
+                 if (!cores[i]->window.is_empty()) return false;
+-                if (configs.debug_context_swithing() == "on")    // if simulation encounter problem then retry, mshr list checking required.
++                if (debug_ctx_switch)    // if simulation encounter problem then retry, mshr list checking required.
+                 {
+                     if (!cores[i]->caches[1]->retry_list.empty()) return false;
+                     if (!cores[i]->caches[0]->retry_list.empty()) return false;
+@@ -460,7 +493,7 @@ bool Processor::can_context_switch(long processID)
+                 }
+ 
+                 /* if NLP side not present then flush all the dirty data to memory before NMP execution */
+-                if (configs.get_nlp_facility() == "off") 
++                if (nlp_off)
+                 {
+                     // if (cores[i]->caches[1]->flush_dirty_lines(cores[i]->id)) return false;  // These are not correctly working.
+                     // if (cores[i]->caches[0]->flush_dirty_lines(cores[i]->id)) return false;
+@@ -468,10 +501,10 @@ bool Processor::can_context_switch(long processID)
+                     flush_all_caches();
+                 }
+ 
+-                if (configs.debug_context_swithing() == "on") if (!cachesys->is_wait_list_empty(cores[i]->id)) return false;
++                if (debug_ctx_switch) if (!cachesys->is_wait_list_empty(cores[i]->id)) return false;
+             }
+         }
+-        if (configs.debug_context_swithing() == "on") 
++        if (debug_ctx_switch)
+         {
+             if (memory.pending_link_packets() > 0) return false;
+             if (memory.pending_requests() > 0) return false;
+@@ -482,7 +515,7 @@ bool Processor::can_context_switch(long processID)
+         for (unsigned int i = 0; i < cores.size(); ++i)
+         {
+             if (!cores[i]->finished()) return false; 
+-            if (configs.debug_context_swithing() == "on")
++            if (debug_ctx_switch)
+             {
+                 if (cores[i]->more_reqs) return false;
+                 if (!cores[i]->caches[0]->retry_list.empty()) return false;
+@@ -492,7 +525,7 @@ bool Processor::can_context_switch(long processID)
+                 if (!cachesys->is_wait_list_empty(cores[i]->id)) return false;
+             }
+         }
+-        if (configs.debug_context_swithing() == "on") 
++        if (debug_ctx_switch)
+         {
+             if (memory.pending_link_packets() > 0) return false;
+             if (memory.pending_requests() > 0) return false;
+@@ -524,7 +557,7 @@ bool Processor::can_nmp_switch()
+         for (unsigned int i = 0; i < cores.size(); ++i)
+         {
+             if (!cores[i]->finished()) return false; 
+-            if (configs.debug_context_swithing() == "on")
++            if (debug_ctx_switch)
+             {
+                 if (cores[i]->more_reqs) return false;
+                 if (!cores[i]->caches[0]->retry_list.empty()) return false;
+@@ -534,7 +567,7 @@ bool Processor::can_nmp_switch()
+                 if (!cachesys->is_wait_list_empty(cores[i]->id)) return false;
+             }
+         }
+-        if (configs.debug_context_swithing() == "on") 
++        if (debug_ctx_switch)
+         {
+             if (memory.pending_link_packets() > 0) return false;
+             if (memory.pending_requests() > 0) return false;
+@@ -544,14 +577,14 @@ bool Processor::can_nmp_switch()
+     {
+         for (unsigned int i = 0; i < cores.size(); ++i)
+         {
+-            if (configs.debug_context_swithing() == "on")
++            if (debug_ctx_switch)
+             {
+                 if (!cores[i]->caches[0]->retry_list.empty()) return false;
+                 if (cores[i]->llc != nullptr ) if (!cores[i]->llc->retry_list.empty()) return false;
+                 if (!cachesys->is_wait_list_empty(cores[i]->id)) return false;
+             }
+         }
+-        if (configs.debug_context_swithing() == "on") 
++        if (debug_ctx_switch)
+         {
+             if (memory.pending_link_packets() > 0) return false;
+             if (memory.pending_requests() > 0) return false;
+@@ -587,12 +620,9 @@ bool Processor::is_complete()
+ /* calculate total executed instruction on the processing side (for all cores) */
+ float Processor::calculate_total_instruction()
+ {
+-    long totalInst = 0;
+-    for (unsigned int i = 0; i < cores.size(); ++i)
+-    {
+-        totalInst += cores[i]->cpu_inst.value();
+-    }
+-    return totalInst;
++    // executed_insts is incremented next to every cpu_inst++ in the cores, so it always equals
++    // the sum the old loop computed. Returning it as float keeps the original rounding behaviour.
++    return executed_insts;
+ }
+ 
+ /* calculate total energy on the processing side (from core to memory) */
+@@ -605,6 +635,7 @@ float Processor::calculate_Energy()
+     long idle_cycle = 0;
+     long l1_cache_access = 0, l2_cache_access = 0, llc_cache_access = 0, memory_access = 0;
+     float energy;
++    sync_all_idle();
+     for (unsigned int i = 0; i < cores.size(); ++i)
+     {
+         active_cycle += (cores[i]->clk - cores[i]->idle_cycles.value());
+@@ -666,7 +697,7 @@ Core::Core(const Config &configs, int coreid, function<bool(Request)> send_next,
+            Cache *llc, std::shared_ptr<CacheSystem> cachesys, MemoryBase &memory, bool is_nmp, bool nlp_side)
+     : configs(configs), is_nmp(is_nmp), nlp_side(nlp_side), id(coreid), no_core_caches(!configs.has_core_caches()),
+       no_shared_cache(!(configs.has_l3_cache() && !is_nmp)), cachesys(cachesys),
+-      llc(llc), memory(memory)
++      llc(llc), memory(memory), opcodeCycleCount(initialize_arch_cycle_db())
+ {
+     if (nlp_side) no_shared_cache=false;
+     inFlightMemoryAccess = 0;
+@@ -698,7 +729,8 @@ Core::Core(const Config &configs, int coreid, function<bool(Request)> send_next,
+             caches.emplace_back(new Cache(
+                 l1_size, l1_assoc, l1_blocksz, l1_mshr_num,
+                 Cache::Level::L1, cachesys, is_nmp));
+-            send = bind(&Cache::send, caches[1].get(), placeholders::_1);
++            Cache* l1 = caches[1].get();
++            send = [l1](Request req) { return l1->send(std::move(req)); };
+ 
+             if (llc != nullptr)
+             {
+@@ -731,7 +763,8 @@ Core::Core(const Config &configs, int coreid, function<bool(Request)> send_next,
+             // L1 caches[0]
+             caches.emplace_back(new Cache(l1_size, l1_assoc, l1_blocksz, l1_mshr_num,
+                                           Cache::Level::L1, cachesys, is_nmp));
+-            send = bind(&Cache::send, caches[0].get(), placeholders::_1);
++            Cache* l1 = caches[0].get();
++            send = [l1](Request req) { return l1->send(std::move(req)); };
+ 
+             if (llc != nullptr)
+             {
+@@ -741,7 +774,20 @@ Core::Core(const Config &configs, int coreid, function<bool(Request)> send_next,
+         }
+     }
+ 
+-    initialize_arch_cycle_db();  // initialize the cycle consumption values for x86 opcode.
++    // cache the config values the tick loop reads, so it never touches the string map.
++    if (cpu_type == "inOrder") core_model = CoreModel::InOrder;
++    else if (cpu_type == "outOrder") core_model = CoreModel::OutOrder;
++    if (configs.contains("sim_mode")) sim_mode = parse_sim_mode(configs.get_simulation_mode());
++    nlp_on = option_is(configs, "nlp_facility", "on");
++    inst_fetch_on = option_is(configs, "consider_inst_fetching", "on");
++    if (configs.contains("overhead_cycle")) overhead_cycle_cfg = configs.get_overhead_cycle();
++    if (configs.contains("mcp_core_queue_max_size")) nmp_queue_max = configs.get_nmp_core_queue_max_size();
++    if (configs.contains("llc_slice")) nlp_core_count = configs.get_nlp_core_num();
++
++    const std::string mem_type = configs.get_memory_type();
++    if (mem_type == "HMC") { mem_standard = MemStandard::HMC; mem_hmc = dynamic_cast<Memory<HMC, Controller> *>(&memory); }
++    else if (mem_type == "HBM") { mem_standard = MemStandard::HBM; mem_hbm = dynamic_cast<Memory<HBM, Controller> *>(&memory); }
++    else if (mem_type == "HBM2") { mem_standard = MemStandard::HBM2; mem_hbm2 = dynamic_cast<Memory<HBM2, Controller> *>(&memory); }
+ 
+     /* setup stats metrices for individual core */
+     record_region_count.name("record_region_count_" + to_string(id))
+@@ -781,22 +827,28 @@ Core::Core(const Config &configs, int coreid, function<bool(Request)> send_next,
+ }
+ 
+ /* initialize cycle consumption values w.r.t. opcode (for x86), it can be extend for diverse architecture */
+-void Core::initialize_arch_cycle_db()
++/* the table is read-only after loading, so all cores share one copy instead of each parsing the CSV */
++const std::unordered_map<std::string, int>& Core::initialize_arch_cycle_db()
+ {
+-    std::ifstream opCyfile("common/x86_opcode_cycles.csv");
+-    if (!opCyfile) {
+-        std::cerr << "Error opening file!" << std::endl;
+-        return;
+-    }
+-    std::string opcy_line;
+-    while (std::getline(opCyfile, opcy_line)) {
+-        std::stringstream ss(opcy_line);
+-        std::string opcode;
+-        int cycleCount;
+-        if (std::getline(ss, opcode, ',') && ss >> cycleCount) {
+-            opcodeCycleCount[opcode] = cycleCount;
++    static const std::unordered_map<std::string, int> table = [] {
++        std::unordered_map<std::string, int> t;
++        std::ifstream opCyfile("common/x86_opcode_cycles.csv");
++        if (!opCyfile) {
++            std::cerr << "Error opening file!" << std::endl;
++            return t;
+         }
+-    }
++        std::string opcy_line;
++        while (std::getline(opCyfile, opcy_line)) {
++            std::stringstream ss(opcy_line);
++            std::string opcode;
++            int cycleCount;
++            if (std::getline(ss, opcode, ',') && ss >> cycleCount) {
++                t[opcode] = cycleCount;
++            }
++        }
++        return t;
++    }();
++    return table;
+ }
+ 
+ /* it load the trace files for the core */
+@@ -835,15 +887,14 @@ void Core::execution_flag_set()
+     }
+ 
+     // get the no of cycle required to perform the operation by the core without memory transfer (getting from x86_opcode_cycles.csv).
+-    if (opcodeCycleCount.find(trace_line.opcode) != opcodeCycleCount.end())
+-        bubble_cnt = opcodeCycleCount[trace_line.opcode];
+-    else
+-        bubble_cnt = 0;
++    auto op_it = opcodeCycleCount.find(trace_line.opcode);   // one lookup instead of find + operator[].
++    bubble_cnt = (op_it != opcodeCycleCount.end()) ? op_it->second : 0;
+ }
+ 
+ /* load first trace line when core to be execute */
+ void Core::get_first_instruction()
+ {
++    wake();   // this core may be given work now, so it has to be ticked normally again.
+     if (!more_reqs)
+     {
+         if (trace_assigned)  // load from trace file.
+@@ -856,7 +907,7 @@ void Core::get_first_instruction()
+                 memory_allocates();
+                 execution_flag_set();
+                 lock_core = (!more_reqs);
+-                if (configs.get_simulation_mode() == "MCP-Only") lock_core = true;
++                if (sim_mode == SimMode::MCPOnly) lock_core = true;
+             }
+         }
+         else // load from inst_queue.trace_queue (MCP PUs always load from queue).
+@@ -881,18 +932,21 @@ void Core::get_first_instruction()
+         reached_limit = (!more_reqs);
+ 
+         // call for initilize the JSON file which contains offlaodable region's information.
+-        if (configs.get_simulation_mode() == "Co-Simulation" && cpu_type == "outOrder" && more_reqs) compiler_assist_setup(deployed_app_id);
++        if (sim_mode == SimMode::CoSimulation && core_model == CoreModel::OutOrder && more_reqs) compiler_assist_setup(deployed_app_id);
+     }
+ }
+ 
+ /* load next trace line if avaliable otherwise more_req will be false */
+ bool Core::get_next_instruction()
+ {
++    wake();
+     if (trace_assigned)
+     {
+         more_reqs = trace_per_core.get_trace_line(trace_line);
+         memory_allocates();
+-        while (trace_line.threadID != current_thread_id)
++        // stop at end of file: without the more_reqs check a trace ending on another thread's line
++        // re-pushed that same stale line forever (infinite loop until out of memory).
++        while (more_reqs && trace_line.threadID != current_thread_id)
+         {
+             own_proc->cores[trace_line.threadID]->inst_queue.trace_queue.push_back(trace_line);
+             own_proc->cores[trace_line.threadID]->inst_queue.numberInstructionsInQueue++;
+@@ -956,7 +1010,7 @@ void Core::tick_outOrder()
+                 nmp_proc->cores[k]->get_first_instruction();
+             }
+             
+-            if (configs.get_nlp_facility() == "on")
++            if (nlp_on)
+             {
+                 for (unsigned int l = 0; l < nlp_proc->cores.size(); ++l) {
+                     nlp_proc->cores[l]->get_first_instruction();
+@@ -976,7 +1030,7 @@ void Core::tick_outOrder()
+     if (wait_for_nmp_finish)
+     {
+         if (!nmp_proc->can_context_switch(trace_line.processID)) { idle_cycles++; return; }
+-        if (configs.get_nlp_facility() == "on") if (!nlp_proc->can_context_switch(trace_line.processID)) { idle_cycles++; return; }
++        if (nlp_on) if (!nlp_proc->can_context_switch(trace_line.processID)) { idle_cycles++; return; }
+         wait_for_nmp_finish = false;
+         proc_switching_flag = false;
+     }
+@@ -993,6 +1047,7 @@ void Core::tick_outOrder()
+             inFlightMemoryAccess++;     // inst is fetching therefor no further execution until it recv.
+             trace_line.instPointer = 0;
+             cpu_inst++;
++            own_proc->executed_insts++;
+             if (!loads_exe_flag || !stores_exe_flag) memory_inst++;
+             inserted++;
+         }
+@@ -1037,7 +1092,7 @@ void Core::tick_outOrder()
+     get_next_instruction();    // get the next trace line (or say instruction).
+ 
+     // if trace line contain offloadble tag (ROI_BEGIN/ROI_END) or line reside in an offloadable region (inside_region flag), offloading operation perform.
+-    if (strcmp(trace_line.opcode, "ROI_BEGIN") == 0 || strcmp(trace_line.opcode, "ROI_END") == 0 || inside_region || configs.get_simulation_mode() == "MCP-Only")
++    if (strcmp(trace_line.opcode, "ROI_BEGIN") == 0 || strcmp(trace_line.opcode, "ROI_END") == 0 || inside_region || sim_mode == SimMode::MCPOnly)
+         offload_stratigy();
+ 
+     // if limit of executed instruction reaches limit then finish and set reached_limit flag to true, also more_req set to false (to specify forefully that there no line exist).
+@@ -1083,14 +1138,14 @@ void Core::offload_stratigy()
+         return;
+     }
+ 
+-    if (configs.get_simulation_mode() == "Host-Only")
+-        host_only();
+-    else if (configs.get_simulation_mode() == "All-Offload")
+-        all_offload();
+-    else if (configs.get_simulation_mode() == "Co-Simulation")
+-        compiler_assist_offload();
+-    else if (configs.get_simulation_mode() == "MCP-Only")
+-        nmp_only();
++    switch (sim_mode)
++    {
++    case SimMode::HostOnly: host_only(); break;
++    case SimMode::AllOffload: all_offload(); break;
++    case SimMode::CoSimulation: compiler_assist_offload(); break;
++    case SimMode::MCPOnly: nmp_only(); break;
++    default: break;
++    }
+ }
+ 
+ /* host CPU will perform each instruaction (trace line) except offloadable tags */
+@@ -1121,7 +1176,7 @@ void Core::nmp_only()
+         } while (!valid); 
+     }
+     
+-    decision_overhead_cycles += configs.get_overhead_cycle();
++    decision_overhead_cycles += overhead_cycle_cfg;
+     lock_core = true;
+     instruction_bypass();
+ }
+@@ -1155,7 +1210,7 @@ void Core::all_offload()
+     // if the trace line contain starting offloadable tag then push the region id in offloading set, and lock the participating CPU core not perform any instruction further.
+     if (strcmp(trace_line.opcode, "ROI_BEGIN") == 0)
+     {
+-        decision_overhead_cycles += configs.get_overhead_cycle();    // decision-making overhead cycle added.
++        decision_overhead_cycles += overhead_cycle_cfg;    // decision-making overhead cycle added.
+         record_region_count++;
+         record_offload_region_count++;
+         offload_region_ids.insert(trace_line.regionID);     // offloaded region ID inserted added in offloading list.
+@@ -1171,7 +1226,7 @@ void Core::all_offload()
+         {
+             record_region_count++;
+             record_offload_region_count++;
+-            decision_overhead_cycles += configs.get_overhead_cycle();
++            decision_overhead_cycles += overhead_cycle_cfg;
+             offload_region_ids.insert(trace_line.regionID);
+             if (offload_region_ids.size() >= 1)
+             {
+@@ -1234,7 +1289,7 @@ void Core::compiler_assist_offload()
+         record_region_count++;
+         std::vector<float> system_state = own_proc->collect_system_info();    // currently system stats are not using during decision-making process but can be used.
+         std::vector<float> bb_info_state = collect_basicblock_info(trace_line.regionID);    // collect basic block info using its region ID.
+-        decision_overhead_cycles += configs.get_overhead_cycle();
++        decision_overhead_cycles += overhead_cycle_cfg;
+         /* currently its only check the no of memory and non-memory inst. if more memory inst then it offload to MCP side */
+         if (bb_info_state[0] > bb_info_state[1] || prev_ips < system_state[0]) {
+             record_offload_region_count++;
+@@ -1254,7 +1309,7 @@ void Core::compiler_assist_offload()
+             record_region_count++;
+             std::vector<float> system_state = own_proc->collect_system_info();
+             std::vector<float> bb_info_state = collect_basicblock_info(trace_line.regionID);
+-            decision_overhead_cycles += configs.get_overhead_cycle();
++            decision_overhead_cycles += overhead_cycle_cfg;
+             if (bb_info_state[0] > bb_info_state[1] || prev_ips < system_state[0]) {
+                 record_offload_region_count++;
+                 offload_region_ids.insert(trace_line.regionID);
+@@ -1291,6 +1346,7 @@ void Core::compiler_assist_setup(int procId)
+ {
+     // Load the JSON info files.
+     std::string bb_path = configs.get_json_path() + "proc_"+ std::to_string(procId) + "_bb_info.json";
++    if (bb_path == loaded_bb_path) return;   // already parsed; the file does not change during a run.
+     ifstream file1(bb_path);
+     if (!file1.is_open())
+         std::cerr << "Failed to open the info files!" << endl;
+@@ -1298,6 +1354,38 @@ void Core::compiler_assist_setup(int procId)
+     {
+         file1 >> bb_info_data;
+         file1.close();
++        loaded_bb_path = bb_path;
++        build_bb_index();
++    }
++}
++
++/* map BasicBlockID -> block so region lookups are O(1). The first block with a given ID wins,
++   matching the linear scan. If the JSON has any shape the scan would treat differently
++   (non-integer IDs, non-object entries), the index is marked incomplete and the scan is used. */
++void Core::build_bb_index()
++{
++    bb_index.clear();
++    bb_index_complete = true;
++    for (auto &function : bb_info_data)
++    {
++        if (!function.is_object()) { bb_index_complete = false; return; }
++        auto bbs = function.find("BasicBlocks");
++        if (bbs == function.end()) continue;
++        if (!bbs->is_array()) { bb_index_complete = false; return; }
++        for (auto &block : *bbs)
++        {
++            if (!block.is_object()) { bb_index_complete = false; return; }
++            auto idv = block.find("BasicBlockID");
++            if (idv == block.end()) continue;
++            if (idv->is_number_unsigned())
++            {
++                if (idv->get<unsigned long>() > (unsigned long)LONG_MAX) { bb_index_complete = false; return; }
++                bb_index.emplace((long)idv->get<unsigned long>(), &block);
++            }
++            else if (idv->is_number_integer())
++                bb_index.emplace(idv->get<long>(), &block);
++            else if (!idv->is_null()) { bb_index_complete = false; return; }
++        }
+     }
+ }
+ 
+@@ -1305,6 +1393,17 @@ void Core::compiler_assist_setup(int procId)
+ std::vector<float> Core::collect_basicblock_info(int blockID)
+ {
+     std::vector<float> result;
++    if (bb_index_complete)
++    {
++        auto hit = bb_index.find(blockID);
++        if (hit == bb_index.end()) return result;
++        json &block = *hit->second;
++        result.push_back(block["MemoryInstructions"]);
++        result.push_back(block["NonMemoryInstructions"]);
++        result.push_back(block["TotalInstructions"]);
++        result.push_back(block["TotalMemoryConsumption"]);
++        return result;
++    }
+     for (auto &function : bb_info_data)
+     {
+         auto &basicBlocks = function["BasicBlocks"];
+@@ -1332,7 +1431,7 @@ void Core::instruction_bypass()
+     bool read_dirty = false, write_dirty = false;     // reset the flags.
+ 
+     // if NLP mode active then check the dirty data at LLC level.
+-    if (configs.get_nlp_facility() == "on")     
++    if (nlp_on)
+     { 
+         int counter = 0;
+         while (trace_line.sourceAddr[counter] != 0)
+@@ -1351,10 +1450,10 @@ void Core::instruction_bypass()
+     // if dirty data found then instruction will added to NLP cores otherwise NMP cores. (this can be extended using &&).
+     if (read_dirty || write_dirty)
+     {
+-        int dist_nlp_core_id = nlp_core_id_gen % configs.get_nlp_core_num();    // get the ID of NLP core.
++        int dist_nlp_core_id = nlp_core_id_gen % nlp_core_count;    // get the ID of NLP core.
+ 
+         // if the queue is full then return and wait for next tick utill it find vacant.
+-        if (configs.get_nmp_core_queue_max_size() != 0 && nlp_proc->cores[dist_nlp_core_id]->inst_queue.numberInstructionsInQueue >= configs.get_nmp_core_queue_max_size())
++        if (nmp_queue_max != 0 && nlp_proc->cores[dist_nlp_core_id]->inst_queue.numberInstructionsInQueue >= nmp_queue_max)
+         {
+             pending_inst_bypass = true;
+             return;
+@@ -1368,7 +1467,7 @@ void Core::instruction_bypass()
+     else    // otherwise insert the instruction to the NMP core whos corrosponding vault has the instruction.
+     {
+         Core *nmp_core = nmp_proc->cores[get_channel_or_vault_target(trace_line.instPointer)].get();
+-        if (configs.get_nmp_core_queue_max_size() != 0 && nmp_core->inst_queue.numberInstructionsInQueue >= configs.get_nmp_core_queue_max_size())
++        if (nmp_queue_max != 0 && nmp_core->inst_queue.numberInstructionsInQueue >= nmp_queue_max)
+         {
+             pending_inst_bypass = true;
+             return;
+@@ -1382,11 +1481,12 @@ void Core::instruction_bypass()
+ /* check the current address (addr) is dirty at level LLC or not (return true/false) */
+ bool Core::check_for_dirty(long addr)
+ {
+-    auto it =  llc->cache_lines.find(llc->get_index(addr));
++    auto it = llc->cache_lines.find(llc->get_index(addr));
+     if(it != llc->cache_lines.end()){
+         auto& lines = it->second;
++        const long tag = llc->get_tag(addr);
+         for(auto it = lines.begin(); it != lines.end(); ++it){
+-            if(it->tag == llc->get_tag(addr)){
++            if(it->tag == tag){
+                 if(it->dirty == true) {
+                     return true;
+                 }
+@@ -1399,9 +1499,9 @@ bool Core::check_for_dirty(long addr)
+ /* get the mmeory vault address where the requesting address (mem_addr) is reside */
+ int Core::get_channel_or_vault_target(long mem_addr)
+ {
+-    MemoryBase *ptr_mem = &memory;
+-    if (configs.get_memory_type() == "HMC") {
+-        Memory<HMC, Controller> *ptr = dynamic_cast<Memory<HMC, Controller> *>(ptr_mem);
++    // typed memory pointers are resolved once in the constructor (no string compare or dynamic_cast per call).
++    if (mem_standard == MemStandard::HMC) {
++        Memory<HMC, Controller> *ptr = mem_hmc;
+         ptr->clear_higher_bits(mem_addr, ptr->max_address - 1ll);
+         ptr->clear_lower_bits(mem_addr, ptr->tx_bits);
+         int max_block_col_bits = ptr->spec->maxblock_entry.flit_num_bits - ptr->tx_bits;
+@@ -1410,19 +1510,20 @@ int Core::get_channel_or_vault_target(long mem_addr)
+         return vault_target;
+     }
+     
+-    if (configs.get_memory_type() == "HBM") {
+-        Memory<HBM, Controller> *ptr = dynamic_cast<Memory<HBM, Controller> *>(ptr_mem);
++    if (mem_standard == MemStandard::HBM) {
++        Memory<HBM, Controller> *ptr = mem_hbm;
+         ptr->clear_lower_bits(mem_addr, ptr->tx_bits);
+         int channel_target = ptr->slice_lower_bits(mem_addr, ptr->addr_bits[int(HBM::Level::Channel)]);
+         return channel_target;
+     }
+ 
+-    if (configs.get_memory_type() == "HBM2") {
+-        Memory<HBM2, Controller> *ptr = dynamic_cast<Memory<HBM2, Controller> *>(ptr_mem);
++    if (mem_standard == MemStandard::HBM2) {
++        Memory<HBM2, Controller> *ptr = mem_hbm2;
+         ptr->clear_lower_bits(mem_addr, ptr->tx_bits);
+         int channel_target = ptr->slice_lower_bits(mem_addr, ptr->addr_bits[int(HBM2::Level::Channel)]);
+         return channel_target;
+     }
++    return -1;  // unsupported standard (the old code fell off the end here, which is undefined behaviour).
+ }
+ 
+ /* this is used to lock/unlock the cores (using flag) which executing the current process (using processID) */
+@@ -1443,7 +1544,7 @@ void Core::tick_inOrder()
+     if (inFlightMemoryAccess >= 1) return;
+ 
+     // if NMP side, then after NLP finish NMP cores will be unloacked to execute further.
+-    if (configs.get_nlp_facility() == "on" && !nlp_side) {
++    if (nlp_on && !nlp_side) {
+         if (!nlp_proc->can_nmp_switch()) { idle_cycles++; return; }
+         else lock_core = false;
+     }
+@@ -1456,7 +1557,7 @@ void Core::tick_inOrder()
+     // begin to execute the instruction (remining workflow are same as OoO).
+     if (trace_line.instPointer != 0)
+     {
+-        if (configs.inst_fetching() == "on")    // if instruction fetching as an read req is enable then it send to memory.
++        if (inst_fetch_on)    // if instruction fetching as an read req is enable then it send to memory.
+         {
+             Request req(trace_line.instPointer, Request::Type::READ, callback, id, is_nmp);
+             req.instruction_request = true;
+@@ -1465,8 +1566,9 @@ void Core::tick_inOrder()
+         } else ++bubble_cnt;    // otherwise just consume one cycle (bubble_cnt) becz this simulator does not have icache concept properly.
+         trace_line.instPointer = 0;
+         cpu_inst++;
++        own_proc->executed_insts++;
+         if (!loads_exe_flag || !stores_exe_flag) memory_inst++;
+-        if (configs.inst_fetching() == "on") return;
++        if (inst_fetch_on) return;
+     }
+ 
+     int inserted = 0;
+@@ -1525,17 +1627,64 @@ void Core::tick_inOrder()
+ void Core::tick()
+ {
+     clk++;
+-    if (cpu_type == "inOrder")
++    switch (core_model)
++    {
++    case CoreModel::InOrder:
+         tick_inOrder();
+-    else if (cpu_type == "outOrder")
++        break;
++    case CoreModel::OutOrder:
++        // an idle core with an empty window and nothing to retry would only count an idle cycle.
++        if (core_idle_fast())
++        {
++            idle_cycles++;
++            asleep = true;                       // skip this core until it is woken or read.
++            sleep_from = own_proc->proc_ticks;
++            return;
++        }
+         tick_outOrder();
+-    else
++        break;
++    default:
+         cout << "Something is wrong \n";
++    }
++}
++
++/* add the processor ticks this core slept through. A tick counts as passed if the processor has
++   already reached this core in it: always outside tick(), and inside tick() only when this core's
++   index is lower than the core currently running (higher ones get their turn later in the loop). */
++void Core::sync_idle()
++{
++    if (!asleep) return;
++    long upto = own_proc->proc_ticks;
++    int my_index = id - own_proc->initial_core_id;
++    if (own_proc->ticking_index >= 0 && my_index > own_proc->ticking_index) upto -= 1;
++    long missed = upto - sleep_from;
++    if (missed > 0)
++    {
++        clk += missed;
++        idle_cycles += missed;
++    }
++    sleep_from = upto;
++}
++
++void Core::wake()
++{
++    if (!asleep) return;
++    sync_idle();
++    asleep = false;
++}
++
++/* true when tick_outOrder() would do nothing except idle_cycles++: no trace line, an empty
++   window (retire() returns 0) and no pending retries anywhere Cache::tick() would look. */
++bool Core::core_idle_fast()
++{
++    if (more_reqs || window.load != 0) return false;
++    return first_level_cache == nullptr || first_level_cache->retry_chain_empty();
+ }
+ 
+ /* calculate and show the weightage IPC for the core */
+ double Core::calc_ipc()
+ {
++    sync_idle();
+     // printf("[%d]retired: %ld, clk, %ld\n", id, retired, clk);
+     return (double)retired / clk;
+ }
+@@ -1577,6 +1726,7 @@ void Core::reset_stats()
+ {
+     clk = 0;
+     retired = 0;
++    own_proc->executed_insts -= long(cpu_inst.value());
+     cpu_inst = 0;
+ }
+ 
+@@ -1604,10 +1754,10 @@ void Window::insert(bool ready, long addr)
+ {
+     assert(load <= depth);
+ 
+-    ready_list.at(head) = ready;
+-    addr_list.at(head) = addr;
++    ready_list[head] = ready;
++    addr_list[head] = addr;
+ 
+-    head = (head + 1) % depth;
++    if (++head == depth) head = 0;
+     load++;
+ }
+ 
+@@ -1622,10 +1772,10 @@ long Window::retire()
+     int retired = 0;
+     while (load > 0 && retired < ipc)
+     {
+-        if (!ready_list.at(tail))
++        if (!ready_list[tail])
+             break;
+ 
+-        tail = (tail + 1) % depth;
++        if (++tail == depth) tail = 0;
+         load--;
+         retired++;
+     }
+@@ -1639,12 +1789,14 @@ void Window::set_ready(long addr, int mask)
+     if (load == 0)
+         return;
+ 
++    const long m = mask;               // same sign-extension as the old implicit int -> long conversion.
++    const long target = addr & m;
++    int index = tail;
+     for (int i = 0; i < load; i++)
+     {
+-        int index = (tail + i) % depth;
+-        if ((addr_list.at(index) & mask) != (addr & mask))
+-            continue;
+-        ready_list.at(index) = true;
++        if ((addr_list[index] & m) == target)
++            ready_list[index] = true;
++        if (++index == depth) index = 0;
+     }
+ }
+ 
+diff --git a/src/Processor.h b/src/Processor.h
+index de730a2..1481782 100644
+--- a/src/Processor.h
++++ b/src/Processor.h
+@@ -96,6 +96,14 @@ public:
+ 
+ class Processor;
+ 
++/* Config values that the tick loop needs. They are parsed once at construction,
++   because Config getters do a std::map<string,string> lookup and return a string copy. */
++enum class CoreModel { InOrder, OutOrder, Unknown };
++enum class SimMode { HostOnly, AllOffload, CoSimulation, MCPOnly, Unknown };
++enum class MemStandard { HMC, HBM, HBM2, Unknown };
++
++SimMode parse_sim_mode(const std::string& mode);
++
+ class Core {
+ public:
+     Core(const Config& configs, int coreid,
+@@ -150,7 +158,7 @@ public:
+     bool loads_exe_flag, stores_exe_flag;   // these are simple excution tracking flags.
+     double prev_ips;
+ 
+-    std::unordered_map<std::string, int> opcodeCycleCount;  // this will store the info of which opcode consume how many cycle.
++    const std::unordered_map<std::string, int>& opcodeCycleCount;  // shared, read-only opcode -> cycle table (loaded once).
+     set<long> offload_region_ids;                           // track the offloading region IDs.
+     std::shared_ptr<CacheSystem> cachesys;                  // cache system pointer.
+     trace_format trace_line;                                // storing one instruction info which fetched from trace file.
+@@ -170,6 +178,31 @@ public:
+     Processor* nlp_proc;                        // pointer of NLP side.
+     Processor* own_proc;                        // pointer of own processing side.
+ 
++    CoreModel core_model = CoreModel::Unknown;  // cached from cpu_type.
++    SimMode sim_mode = SimMode::Unknown;        // cached from configs.get_simulation_mode().
++    bool nlp_on = false;                        // cached from configs.get_nlp_facility() == "on".
++    bool inst_fetch_on = false;                 // cached from configs.inst_fetching() == "on".
++    int overhead_cycle_cfg = 0;                 // cached from configs.get_overhead_cycle().
++    int nmp_queue_max = 0;                      // cached from configs.get_nmp_core_queue_max_size().
++    int nlp_core_count = 1;                     // cached from configs.get_nlp_core_num().
++    MemStandard mem_standard = MemStandard::Unknown;
++    Memory<HMC, Controller>* mem_hmc = nullptr; // typed memory pointers, resolved once instead of a
++    Memory<HBM, Controller>* mem_hbm = nullptr; // dynamic_cast on every address lookup.
++    Memory<HBM2, Controller>* mem_hbm2 = nullptr;
++    std::string loaded_bb_path;                 // JSON already parsed into bb_info_data.
++    std::unordered_map<long, json*> bb_index;   // BasicBlockID -> block, built once per JSON load.
++    bool bb_index_complete = false;             // false if some IDs could not be indexed (fallback to scan).
++    void build_bb_index();
++    bool core_idle_fast();                      // true when an out-of-order tick would do nothing but count idle.
++
++    // An idle out-of-order core is put to sleep instead of being ticked every cycle. While asleep,
++    // each processor tick it misses would only have done clk++ and idle_cycles++, so those are
++    // added in one step (sync_idle) before anything reads them or the core gets work again (wake).
++    bool asleep = false;
++    long sleep_from = 0;                        // last processor tick already counted in clk / idle_cycles.
++    void sync_idle();
++    void wake();
++
+     ScalarStat record_cycs;                     // stats containers.
+     ScalarStat record_insts;
+     ScalarStat memory_access_cycles;
+@@ -190,7 +223,7 @@ public:
+     void get_first_instruction();
+     void load_trace(string trace_base_name, const Config& configs);
+     std::vector<float> collect_basicblock_info(int blockID);
+-    void initialize_arch_cycle_db();
++    static const std::unordered_map<std::string, int>& initialize_arch_cycle_db();
+     void compiler_assist_offload();
+     void compiler_assist_setup(int procId);
+     bool check_for_dirty(long addr);
+@@ -245,6 +278,13 @@ public:
+     Processor* nmp_proc;    // pointer of memory side NMP.
+     Processor* nlp_proc;    // pointer of LLC side NLP.
+ 
++    bool debug_ctx_switch = false;      // cached from configs.debug_context_swithing() == "on".
++    bool nlp_off = false;               // cached from configs.get_nlp_facility() == "off".
++    long executed_insts = 0;            // running sum of cores[i]->cpu_inst, kept in step with it.
++    long proc_ticks = 0;                // number of tick() calls so far.
++    int ticking_index = -1;             // index of the core being ticked right now, -1 outside tick().
++    void sync_all_idle();               // bring every sleeping core's clk / idle_cycles up to date.
++
+     ScalarStat cpu_cycles;              // all the stats.
+     ScalarStat total_idle_cycles;
+     ScalarStat average_idle_cycles;
+diff --git a/src/Scheduler.h b/src/Scheduler.h
+index 1de7c0d..56772d0 100644
+--- a/src/Scheduler.h
++++ b/src/Scheduler.h
+@@ -10,6 +10,8 @@
+ #include <functional>
+ #include <cassert>
+ 
++#include <algorithm>
++#include <cstring>
+ using namespace std;
+ 
+ namespace ramulator
+@@ -34,6 +36,18 @@ public:
+ 
+     list<Request>::iterator get_head(list<Request>& q)
+     {
++      // FR-FCFS variants: the controller state (clock, bank states, timing tables) does not change
++      // while the queue is scanned, so is_ready / is_row_hit / is_row_open are fixed for each request
++      // during one call. They are computed at most once per request and cached, which picks the same
++      // request as the old code but avoids asking the same question up to five times per request.
++      if (type == Type::FRFCFS) {
++        if (!load_queue(q)) return q.end();
++        int head = 0;
++        for (int k = 1; k < n_req; ++k)
++          head = pick_frfcfs(head, k);
++        return req_it[head];
++      }
++
+       // TODO make the decision at compile time
+       if (type != Type::FRFCFS_PriorHit) {
+         if (!q.size())
+@@ -45,46 +59,44 @@ public:
+ 
+         return head;
+       } else {
+-        if (!q.size())
+-            return q.end();
+-
+-        auto head = q.begin();
+-        for (auto itr = next(q.begin(), 1); itr != q.end(); itr++) {
+-            head = compare[int(Type::FRFCFS_PriorHit)](head, itr);
++        if (!load_queue(q)) return q.end();
++
++        // oldest request among those that are ready and row hits (or oldest overall).
++        int head = 0;
++        for (int k = 1; k < n_req; ++k) {
++          bool ready1 = ready_hit(head);
++          bool ready2 = ready_hit(k);
++          if (ready1 ^ ready2) {
++            if (!ready1) head = k;
++          } else if (!(req_it[head]->arrive <= req_it[k]->arrive)) {
++            head = k;
++          }
+         }
+ 
+-        if (this->ctrl->is_ready(head) && this->ctrl->is_row_hit(head)) {
+-          return head;
++        if (ready(head) && row_hit(head)) {
++          return req_it[head];
+         }
+ 
+-        // prepare a list of hit request
+-        vector<vector<int>> hit_reqs;
+-        for (auto itr = q.begin() ; itr != q.end() ; ++itr) {
+-          if (this->ctrl->is_row_hit(itr)) {
+-            auto begin = itr->addr_vec.begin();
+-            // TODO Here it assumes all DRAM standards use PRE to close a row
+-            // It's better to make it more general.
+-            auto end = begin + int(ctrl->channel->spec->scope[int(T::Command::PRE)]) + 1;
+-            vector<int> rowgroup(begin, end); // bank or subarray
+-            hit_reqs.push_back(rowgroup);
+-          }
+-        }
++        // requests that are row hits; their bank/subarray prefix must not be closed by a PRE.
++        hit_list.clear();
++        for (int k = 0; k < n_req; ++k)
++          if (row_hit(k)) hit_list.push_back(k);
++
++        // TODO Here it assumes all DRAM standards use PRE to close a row
++        const int group_len = int(ctrl->channel->spec->scope[int(T::Command::PRE)]) + 1;
++
+         // if we can't find proper request, we need to return q.end(),
+         // so that no command will be scheduled
+-        head = q.end();
+-        for (auto itr = q.begin(); itr != q.end(); itr++) {
++        int best = -1;
++        for (int k = 0; k < n_req; ++k) {
+           bool violate_hit = false;
+-          if ((!this->ctrl->is_row_hit(itr)) && this->ctrl->is_row_open(itr)) {
++          if ((!row_hit(k)) && this->ctrl->is_row_open(req_it[k])) {
+             // so the next instruction to be scheduled is PRE, might violate hit
+-            auto begin = itr->addr_vec.begin();
+-            // TODO Here it assumes all DRAM standards use PRE to close a row
+-            // It's better to make it more general.
+-            auto end = begin + int(ctrl->channel->spec->scope[int(T::Command::PRE)]) + 1;
+-            vector<int> rowgroup(begin, end); // bank or subarray
+-            for (const auto& hit_req_rowgroup : hit_reqs) {
+-              if (rowgroup == hit_req_rowgroup) {
+-                  violate_hit = true;
+-                  break;
++            const int* mine = req_it[k]->addr_vec.data();
++            for (int h : hit_list) {
++              if (std::equal(mine, mine + group_len, req_it[h]->addr_vec.data())) {
++                violate_hit = true;
++                break;
+               }
+             }
+           }
+@@ -92,19 +104,57 @@ public:
+             continue;
+           }
+           // If it comes here, that means it won't violate any hit request
+-          if (head == q.end()) {
+-            head = itr;
+-          } else {
+-            head = compare[int(Type::FRFCFS)](head, itr);
+-          }
++          best = (best < 0) ? k : pick_frfcfs(best, k);
+         }
+ 
+-        return head;
++        return best < 0 ? q.end() : req_it[best];
+       }
+     }
+ 
+ private:
+     typedef list<Request>::iterator ReqIter;
++
++    // per-call scratch, kept as members so no allocation happens on each scheduling decision.
++    vector<ReqIter> req_it;
++    vector<signed char> ready_cache, hit_cache;   // -1 = not computed yet
++    vector<int> hit_list;
++    int n_req = 0;
++
++    bool load_queue(list<Request>& q)
++    {
++      n_req = 0;
++      if (q.empty()) return false;
++      req_it.clear();
++      for (auto itr = q.begin(); itr != q.end(); ++itr) req_it.push_back(itr);
++      n_req = int(req_it.size());
++      if (int(ready_cache.size()) < n_req) { ready_cache.resize(n_req); hit_cache.resize(n_req); }
++      std::memset(ready_cache.data(), -1, n_req);
++      std::memset(hit_cache.data(), -1, n_req);
++      return true;
++    }
++
++    bool ready(int k)
++    {
++      if (ready_cache[k] < 0) ready_cache[k] = this->ctrl->is_ready(req_it[k]);
++      return ready_cache[k];
++    }
++
++    bool row_hit(int k)
++    {
++      if (hit_cache[k] < 0) hit_cache[k] = this->ctrl->is_row_hit(req_it[k]);
++      return hit_cache[k];
++    }
++
++    bool ready_hit(int k) { return ready(k) && row_hit(k); }
++
++    // same rule as the FRFCFS comparator: a ready request wins, otherwise the older one (ties keep a).
++    int pick_frfcfs(int a, int b)
++    {
++      bool ready1 = ready(a);
++      bool ready2 = ready(b);
++      if (ready1 ^ ready2) return ready1 ? a : b;
++      return (req_it[a]->arrive <= req_it[b]->arrive) ? a : b;
++    }
+     function<ReqIter(ReqIter, ReqIter)> compare[int(Type::MAX)] = {
+         // FCFS
+         [this] (ReqIter req1, ReqIter req2) {

@@ -117,8 +117,13 @@ namespace ramulator
 
     if (is_hit(lines, req.addr, &line))
     {
-      lines.push_back(Line(req.addr, get_tag(req.addr), false, line->dirty || (req.type == Request::Type::WRITE), req.coreid));
-      lines.erase(line);
+      // move the line to the MRU end in place (same fields as the old push_back + erase, no allocation).
+      line->addr = req.addr;
+      line->tag = get_tag(req.addr);
+      line->lock = false;
+      line->dirty = line->dirty || (req.type == Request::Type::WRITE);
+      line->coreId = req.coreid;
+      lines.splice(lines.end(), lines, line);
       cachesys->hit_list.push_back(make_pair(cachesys->clk + latency[int(level)], req));
       cache_hit++;
       debug_cache("hit, update timestamp %ld", cachesys->clk);
@@ -207,8 +212,12 @@ namespace ramulator
     assert(line != lines.end());
 
     // update LRU queue. The dirty bit will be set if the dirty bit inherited from higher level(s) is set.
-    lines.push_back(Line(addr, get_tag(addr), false, dirty || line->dirty, line->coreId));
-    lines.erase(line);
+    // the line is updated and moved to the MRU end in place instead of being re-allocated.
+    line->addr = addr;
+    line->tag = get_tag(addr);
+    line->lock = false;
+    line->dirty = dirty || line->dirty;
+    lines.splice(lines.end(), lines, line);
   }
 
   /* this invalidate the cache line as state-of-the-art concept */

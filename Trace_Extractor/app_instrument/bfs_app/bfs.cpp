@@ -20,7 +20,7 @@
 #include "HMC.h"
 #endif
 
-#include "../../hook_functions/mcp_hooks.h"
+#include "../../hookFunctions/mcp_hooks.h"
 
 using namespace std;
 

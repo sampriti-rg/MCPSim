@@ -96,6 +96,14 @@ public:
 
 class Processor;
 
+/* Config values that the tick loop needs. They are parsed once at construction,
+   because Config getters do a std::map<string,string> lookup and return a string copy. */
+enum class CoreModel { InOrder, OutOrder, Unknown };
+enum class SimMode { HostOnly, AllOffload, CoSimulation, MCPOnly, Unknown };
+enum class MemStandard { HMC, HBM, HBM2, Unknown };
+
+SimMode parse_sim_mode(const std::string& mode);
+
 class Core {
 public:
     Core(const Config& configs, int coreid,
@@ -150,7 +158,7 @@ public:
     bool loads_exe_flag, stores_exe_flag;   // these are simple excution tracking flags.
     double prev_ips;
 
-    std::unordered_map<std::string, int> opcodeCycleCount;  // this will store the info of which opcode consume how many cycle.
+    const std::unordered_map<std::string, int>& opcodeCycleCount;  // shared, read-only opcode -> cycle table (loaded once).
     set<long> offload_region_ids;                           // track the offloading region IDs.
     std::shared_ptr<CacheSystem> cachesys;                  // cache system pointer.
     trace_format trace_line;                                // storing one instruction info which fetched from trace file.
@@ -169,6 +177,31 @@ public:
     Processor* nmp_proc;                        // pointer of NMP side.
     Processor* nlp_proc;                        // pointer of NLP side.
     Processor* own_proc;                        // pointer of own processing side.
+
+    CoreModel core_model = CoreModel::Unknown;  // cached from cpu_type.
+    SimMode sim_mode = SimMode::Unknown;        // cached from configs.get_simulation_mode().
+    bool nlp_on = false;                        // cached from configs.get_nlp_facility() == "on".
+    bool inst_fetch_on = false;                 // cached from configs.inst_fetching() == "on".
+    int overhead_cycle_cfg = 0;                 // cached from configs.get_overhead_cycle().
+    int nmp_queue_max = 0;                      // cached from configs.get_nmp_core_queue_max_size().
+    int nlp_core_count = 1;                     // cached from configs.get_nlp_core_num().
+    MemStandard mem_standard = MemStandard::Unknown;
+    Memory<HMC, Controller>* mem_hmc = nullptr; // typed memory pointers, resolved once instead of a
+    Memory<HBM, Controller>* mem_hbm = nullptr; // dynamic_cast on every address lookup.
+    Memory<HBM2, Controller>* mem_hbm2 = nullptr;
+    std::string loaded_bb_path;                 // JSON already parsed into bb_info_data.
+    std::unordered_map<long, json*> bb_index;   // BasicBlockID -> block, built once per JSON load.
+    bool bb_index_complete = false;             // false if some IDs could not be indexed (fallback to scan).
+    void build_bb_index();
+    bool core_idle_fast();                      // true when an out-of-order tick would do nothing but count idle.
+
+    // An idle out-of-order core is put to sleep instead of being ticked every cycle. While asleep,
+    // each processor tick it misses would only have done clk++ and idle_cycles++, so those are
+    // added in one step (sync_idle) before anything reads them or the core gets work again (wake).
+    bool asleep = false;
+    long sleep_from = 0;                        // last processor tick already counted in clk / idle_cycles.
+    void sync_idle();
+    void wake();
 
     ScalarStat record_cycs;                     // stats containers.
     ScalarStat record_insts;
@@ -190,7 +223,7 @@ public:
     void get_first_instruction();
     void load_trace(string trace_base_name, const Config& configs);
     std::vector<float> collect_basicblock_info(int blockID);
-    void initialize_arch_cycle_db();
+    static const std::unordered_map<std::string, int>& initialize_arch_cycle_db();
     void compiler_assist_offload();
     void compiler_assist_setup(int procId);
     bool check_for_dirty(long addr);
@@ -244,6 +277,13 @@ public:
     MemoryBase& memory;     // pointer of memory.
     Processor* nmp_proc;    // pointer of memory side NMP.
     Processor* nlp_proc;    // pointer of LLC side NLP.
+
+    bool debug_ctx_switch = false;      // cached from configs.debug_context_swithing() == "on".
+    bool nlp_off = false;               // cached from configs.get_nlp_facility() == "off".
+    long executed_insts = 0;            // running sum of cores[i]->cpu_inst, kept in step with it.
+    long proc_ticks = 0;                // number of tick() calls so far.
+    int ticking_index = -1;             // index of the core being ticked right now, -1 outside tick().
+    void sync_all_idle();               // bring every sleeping core's clk / idle_cycles up to date.
 
     ScalarStat cpu_cycles;              // all the stats.
     ScalarStat total_idle_cycles;

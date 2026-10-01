@@ -10,6 +10,8 @@
 #include <functional>
 #include <cassert>
 
+#include <algorithm>
+#include <cstring>
 using namespace std;
 
 namespace ramulator
@@ -34,6 +36,18 @@ public:
 
     list<Request>::iterator get_head(list<Request>& q)
     {
+      // FR-FCFS variants: the controller state (clock, bank states, timing tables) does not change
+      // while the queue is scanned, so is_ready / is_row_hit / is_row_open are fixed for each request
+      // during one call. They are computed at most once per request and cached, which picks the same
+      // request as the old code but avoids asking the same question up to five times per request.
+      if (type == Type::FRFCFS) {
+        if (!load_queue(q)) return q.end();
+        int head = 0;
+        for (int k = 1; k < n_req; ++k)
+          head = pick_frfcfs(head, k);
+        return req_it[head];
+      }
+
       // TODO make the decision at compile time
       if (type != Type::FRFCFS_PriorHit) {
         if (!q.size())
@@ -45,46 +59,44 @@ public:
 
         return head;
       } else {
-        if (!q.size())
-            return q.end();
+        if (!load_queue(q)) return q.end();
 
-        auto head = q.begin();
-        for (auto itr = next(q.begin(), 1); itr != q.end(); itr++) {
-            head = compare[int(Type::FRFCFS_PriorHit)](head, itr);
-        }
-
-        if (this->ctrl->is_ready(head) && this->ctrl->is_row_hit(head)) {
-          return head;
-        }
-
-        // prepare a list of hit request
-        vector<vector<int>> hit_reqs;
-        for (auto itr = q.begin() ; itr != q.end() ; ++itr) {
-          if (this->ctrl->is_row_hit(itr)) {
-            auto begin = itr->addr_vec.begin();
-            // TODO Here it assumes all DRAM standards use PRE to close a row
-            // It's better to make it more general.
-            auto end = begin + int(ctrl->channel->spec->scope[int(T::Command::PRE)]) + 1;
-            vector<int> rowgroup(begin, end); // bank or subarray
-            hit_reqs.push_back(rowgroup);
+        // oldest request among those that are ready and row hits (or oldest overall).
+        int head = 0;
+        for (int k = 1; k < n_req; ++k) {
+          bool ready1 = ready_hit(head);
+          bool ready2 = ready_hit(k);
+          if (ready1 ^ ready2) {
+            if (!ready1) head = k;
+          } else if (!(req_it[head]->arrive <= req_it[k]->arrive)) {
+            head = k;
           }
         }
+
+        if (ready(head) && row_hit(head)) {
+          return req_it[head];
+        }
+
+        // requests that are row hits; their bank/subarray prefix must not be closed by a PRE.
+        hit_list.clear();
+        for (int k = 0; k < n_req; ++k)
+          if (row_hit(k)) hit_list.push_back(k);
+
+        // TODO Here it assumes all DRAM standards use PRE to close a row
+        const int group_len = int(ctrl->channel->spec->scope[int(T::Command::PRE)]) + 1;
+
         // if we can't find proper request, we need to return q.end(),
         // so that no command will be scheduled
-        head = q.end();
-        for (auto itr = q.begin(); itr != q.end(); itr++) {
+        int best = -1;
+        for (int k = 0; k < n_req; ++k) {
           bool violate_hit = false;
-          if ((!this->ctrl->is_row_hit(itr)) && this->ctrl->is_row_open(itr)) {
+          if ((!row_hit(k)) && this->ctrl->is_row_open(req_it[k])) {
             // so the next instruction to be scheduled is PRE, might violate hit
-            auto begin = itr->addr_vec.begin();
-            // TODO Here it assumes all DRAM standards use PRE to close a row
-            // It's better to make it more general.
-            auto end = begin + int(ctrl->channel->spec->scope[int(T::Command::PRE)]) + 1;
-            vector<int> rowgroup(begin, end); // bank or subarray
-            for (const auto& hit_req_rowgroup : hit_reqs) {
-              if (rowgroup == hit_req_rowgroup) {
-                  violate_hit = true;
-                  break;
+            const int* mine = req_it[k]->addr_vec.data();
+            for (int h : hit_list) {
+              if (std::equal(mine, mine + group_len, req_it[h]->addr_vec.data())) {
+                violate_hit = true;
+                break;
               }
             }
           }
@@ -92,19 +104,57 @@ public:
             continue;
           }
           // If it comes here, that means it won't violate any hit request
-          if (head == q.end()) {
-            head = itr;
-          } else {
-            head = compare[int(Type::FRFCFS)](head, itr);
-          }
+          best = (best < 0) ? k : pick_frfcfs(best, k);
         }
 
-        return head;
+        return best < 0 ? q.end() : req_it[best];
       }
     }
 
 private:
     typedef list<Request>::iterator ReqIter;
+
+    // per-call scratch, kept as members so no allocation happens on each scheduling decision.
+    vector<ReqIter> req_it;
+    vector<signed char> ready_cache, hit_cache;   // -1 = not computed yet
+    vector<int> hit_list;
+    int n_req = 0;
+
+    bool load_queue(list<Request>& q)
+    {
+      n_req = 0;
+      if (q.empty()) return false;
+      req_it.clear();
+      for (auto itr = q.begin(); itr != q.end(); ++itr) req_it.push_back(itr);
+      n_req = int(req_it.size());
+      if (int(ready_cache.size()) < n_req) { ready_cache.resize(n_req); hit_cache.resize(n_req); }
+      std::memset(ready_cache.data(), -1, n_req);
+      std::memset(hit_cache.data(), -1, n_req);
+      return true;
+    }
+
+    bool ready(int k)
+    {
+      if (ready_cache[k] < 0) ready_cache[k] = this->ctrl->is_ready(req_it[k]);
+      return ready_cache[k];
+    }
+
+    bool row_hit(int k)
+    {
+      if (hit_cache[k] < 0) hit_cache[k] = this->ctrl->is_row_hit(req_it[k]);
+      return hit_cache[k];
+    }
+
+    bool ready_hit(int k) { return ready(k) && row_hit(k); }
+
+    // same rule as the FRFCFS comparator: a ready request wins, otherwise the older one (ties keep a).
+    int pick_frfcfs(int a, int b)
+    {
+      bool ready1 = ready(a);
+      bool ready2 = ready(b);
+      if (ready1 ^ ready2) return ready1 ? a : b;
+      return (req_it[a]->arrive <= req_it[b]->arrive) ? a : b;
+    }
     function<ReqIter(ReqIter, ReqIter)> compare[int(Type::MAX)] = {
         // FCFS
         [this] (ReqIter req1, ReqIter req2) {

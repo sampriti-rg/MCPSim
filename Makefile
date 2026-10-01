@@ -10,7 +10,7 @@ OBJS := $(patsubst $(SRCDIR)/%.cpp, $(OBJDIR)/%.o, $(SRCS))
 CXX := g++
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S), Linux)
-  CXXFLAGS := -O3 -std=c++11 -g -w -Wall -Icommon/DRAMPower/src -Lcommon/DRAMPower/src
+  CXXFLAGS := -O3 -flto=auto -std=c++11 -g -w -Wall -Icommon/DRAMPower/src -Lcommon/DRAMPower/src
   LDFLAGS := -lboost_program_options -ldrampowerxml -ldrampower -lxerces-c
 endif
 ifeq ($(UNAME_S), Darwin)

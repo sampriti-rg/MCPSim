@@ -2,8 +2,9 @@
 CC = clang
 CPP = clang++
 LLVM_FLAGS = -S -emit-llvm -fopenmp -fno-discard-value-names -c
-APP_FLAGS = -std=c++0x -Wall -Wno-deprecated -DNO_PFM -O0 -DUSE_OMP -DEDGES_ONLY -DENABLE_OUTPUT -pthread -fopenmp -L tools/lib  -I common -I openG -I/usr/lib/gcc/x86_64-linux-gnu/4.8/include/
+APP_FLAGS = -std=c++0x -Wall -Wno-deprecated -DNO_PFM -O0 -DUSE_OMP -DEDGES_ONLY -DENABLE_OUTPUT -pthread -fopenmp -L tools/lib  -I common -I openG -I/usr/lib/gcc/x86_64-linux-gnu/4.8/include/ -Wl,-rpath,/opt/llvm-10/lib
 LOOP_OPT_FLAGS = -load ../LoopAnnotation.so -loop-annotation
+BB_ANOT_OPT_FLAGS = -load ../BBAnnotationPass.so -bb-annotation
 BB_OPT_FLAGS = -load ../BBInfoPass.so -bb-info
 LLVM_LINK = llvm-link
 OPT = opt
@@ -24,14 +25,14 @@ bfs.ll: bfs.cpp
 # ========================================================================================================================================================================================================
 # LLVM LINKING
 # ========================================================================================================================================================================================================
-linked.ll: bfs.ll ../../hook_functions/mcp_hooks.ll
-	$(LLVM_LINK) -S $^ --override ../../hook_functions/mcp_hooks.ll -o linked.ll
+linked.ll: bfs.ll ../../hookFunctions/mcp_hooks.ll
+	$(LLVM_LINK) -S $^ --override ../../hookFunctions/mcp_hooks.ll -o linked.ll
 
 # ========================================================================================================================================================================================================
 # OPTIMIZATION
 # ========================================================================================================================================================================================================
 inst.ll: linked.ll
-	$(OPT) -S $(BB_OPT_FLAGS) < linked.ll > inst.ll
+	$(OPT) -S $(BB_ANOT_OPT_FLAGS) < linked.ll > inst.ll
 
 # ========================================================================================================================================================================================================
 # CLEAN

@@ -197,12 +197,7 @@ namespace ramulator
 
     std::list<Line> &get_lines(long addr)
     {
-      if (cache_lines.find(get_index(addr)) == cache_lines.end())
-      {
-        cache_lines.insert(make_pair(get_index(addr),
-                                     std::list<Line>()));
-      }
-      return cache_lines[get_index(addr)];
+      return cache_lines[get_index(addr)];  // creates the empty set on first use, as before, with one lookup.
     }
   
   public:
@@ -225,6 +220,18 @@ namespace ramulator
     // bool flush_dirty_lines(long coreId);  // Not working ...
     void flush_line(long addr);
     void flush_all_dirty_lines();
+
+    // true when tick() would find nothing to resend: walks the same caches tick() recurses into.
+    bool retry_chain_empty() const
+    {
+      const Cache *c = this;
+      while (true)
+      {
+        if (!c->retry_list.empty()) return false;
+        if (c->lower_cache->is_last_level) return true;
+        c = c->lower_cache;
+      }
+    }
   };
 
   class CacheSystem

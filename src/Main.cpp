@@ -96,7 +96,7 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
     long next_nmp_tick = nmp_tick - 1;
     long next_mem_tick = mem_tick - 1;
 
-    auto send = bind(&Memory<T, Controller>::send, &memory, placeholders::_1);         // bind the send function with mmeory.
+    auto send = [&memory](Request req) { return memory.send(std::move(req)); };        // send function into memory (a lambda avoids std::bind's heap allocation).
     Processor proc(configs, files, send, memory, false);                               // create CPU processor.
     Processor nmp_proc(configs, files, send, memory, true);                            // create memory side MCP PUs. (i.e., NMP)
     Processor nlp_proc(configs, files, send, memory, true, &proc.llc, proc.cachesys);  // create LLC side MCP PUs. (i.e., NLP)
@@ -113,14 +113,24 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
 
     cout << "System initialization done, simulation starting...\n";
 
-    bool is_warming_up = (configs.get_warmup_insts() != 0);
-    for(long i = 0; is_warming_up; i++) {
+    // Config values read once, instead of a string-map lookup on every loop iteration.
+    const long warmup_insts = configs.get_warmup_insts();
+    const bool host_only = (configs.get_simulation_mode() == "Host-Only");
+    const bool nlp_on = configs.contains("nlp_facility") && configs["nlp_facility"] == "on";
+    const bool weighted_speedup = configs.calc_weighted_speedup();
+    const bool early_exit = configs.is_early_exit();
+
+    // The loop time i is in units of tick_gcd. Instead of stepping i by 1 and doing nothing on
+    // most steps, it jumps straight to the next clock edge. Every edge is still visited, in the
+    // same order (CPU, then MCP, then memory), so the simulation is unchanged.
+    bool is_warming_up = (warmup_insts != 0);
+    for (long i = 0; is_warming_up; i = std::min(next_cpu_tick, next_mem_tick)) {
       if (i == next_cpu_tick) {            
         next_cpu_tick += cpu_tick;
         proc.tick();
         Stats::curTick++;
         is_warming_up = true;
-        if(proc.get_executed_insts() >= configs.get_warmup_insts()) is_warming_up = false;
+        if(proc.get_executed_insts() >= warmup_insts) is_warming_up = false;
         
         if (proc.has_reached_limit()) {
             printf("WARNING: The end of the input trace file was reached during warmup. Consider changing warmup_insts in the config file.\n");
@@ -141,19 +151,21 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
     proc.warmedup_activate();
     printf("Starting the simulation...\n");
 
-    for (long i = 0; ; i++) {
+    // i restarts at 0 here, as in the original loop. The MCP clock was not advanced during warmup,
+    // so in MCP modes it first catches up on its earlier edges before the CPU edges come around.
+    for (long i = 0; ; ) {
         if (i == next_cpu_tick) {            
             next_cpu_tick += cpu_tick;
             proc.tick();
             Stats::curTick++; // processor clock, global, for Statistics
 
-            if (configs.calc_weighted_speedup()) {
+            if (weighted_speedup) {
                 if (proc.has_reached_limit() || proc.finished()) {
                    if ((proc.is_complete()) && (nmp_proc.is_complete()) && (nlp_proc.is_complete())) break;
                 }
             }
             else{
-                if (configs.is_early_exit()) {
+                if (early_exit) {
                     if (proc.finished())
                         break;
                 }
@@ -165,10 +177,10 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
             }
         }
 
-        if(i == next_nmp_tick && configs.get_simulation_mode() != "Host-Only") {
+        if(i == next_nmp_tick && !host_only) {
           next_nmp_tick += nmp_tick;
           nmp_proc.tick();
-          if (configs.get_nlp_facility() == "on") nlp_proc.tick();
+          if (nlp_on) nlp_proc.tick();
           if (proc.finished() && nmp_proc.finished() && nlp_proc.finished() && (proc.is_complete()) && (nmp_proc.is_complete()) && (nlp_proc.is_complete())) break;
         }
 
@@ -176,6 +188,11 @@ void run_cputrace(const Config& configs, Memory<T, Controller>& memory, const st
             next_mem_tick += mem_tick;
             memory.tick();
         }
+
+        // jump to the next clock edge (the MCP clock only counts when it is actually ticked).
+        long next_edge = std::min(next_cpu_tick, next_mem_tick);
+        if (!host_only) next_edge = std::min(next_edge, next_nmp_tick);
+        i = next_edge;
     }
 
     // Calculate stats.
