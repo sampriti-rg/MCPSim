@@ -79,7 +79,7 @@
 #include "getopt.h"
 
 #include "kmeans.h"
-#include "../../hook_functions/mcp_hooks.h"
+#include "../../hookFunctions/mcp_hooks.h"
 
 extern double wtime(void);
 

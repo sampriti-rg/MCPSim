@@ -31,8 +31,8 @@ kmeans_clustering.ll: kmeans_clustering.c kmeans.h
 # ========================================================================================================================================================================================================
 # LLVM LINKING
 # ========================================================================================================================================================================================================
-linked.ll: cluster.ll getopt.ll kmeans.ll kmeans_clustering.ll ../../hook_functions/mcp_hooks.ll
-	$(LLVM_LINK) -S $^ --override ../../hook_functions/mcp_hooks.ll -o linked.ll
+linked.ll: cluster.ll getopt.ll kmeans.ll kmeans_clustering.ll ../../hookFunctions/mcp_hooks.ll
+	$(LLVM_LINK) -S $^ --override ../../hookFunctions/mcp_hooks.ll -o linked.ll
 
 # ========================================================================================================================================================================================================
 # OPTIMIZATION
